@@ -182,11 +182,58 @@ class QuickscanTest extends TestCase
     public function test_membership_fails_closed_and_does_not_trust_email(): void
     {
         $identity = new SolIdentity;
-        $this->assertFalse($identity->isMember((object) ['email' => 'member@scouting.nl']));
         config(['quickscan.oidc.membership_claim' => 'organization.groups', 'quickscan.oidc.membership_values' => ['scouting-member']]);
+        $this->assertFalse($identity->isMember((object) ['email' => 'member@scouting.nl']));
         $this->assertTrue($identity->isMember((object) ['organization' => (object) ['groups' => ['scouting-member']]]));
         $this->assertFalse($identity->isMember((object) ['organization' => (object) ['groups' => ['other']]]));
         $this->assertFalse($identity->isMember((object) ['organization' => (object) ['groups' => [true, 1]] ]));
+    }
+
+    public function test_membership_is_optional_only_when_both_settings_are_empty(): void
+    {
+        config([
+            'quickscan.oidc.issuer' => 'https://issuer.example',
+            'quickscan.oidc.client_id' => 'quickscan',
+            'quickscan.oidc.client_secret' => 'secret',
+            'quickscan.oidc.membership_claim' => '',
+            'quickscan.oidc.membership_values' => [],
+        ]);
+        $identity = new SolIdentity;
+        $this->assertTrue($identity->configured());
+        $this->assertTrue($identity->isMember((object) ['sub' => 'user']));
+        config(['quickscan.oidc.membership_claim' => 'organization.groups']);
+        $this->assertFalse($identity->configured());
+        $this->assertFalse($identity->isMember((object) ['sub' => 'user']));
+        config(['quickscan.oidc.membership_claim' => '', 'quickscan.oidc.membership_values' => ['scouting-member']]);
+        $this->assertFalse($identity->configured());
+        $this->assertFalse($identity->isMember((object) ['sub' => 'user']));
+        config(['quickscan.oidc.membership_claim' => 'organization.groups']);
+        $this->assertTrue($identity->configured());
+        config(['quickscan.oidc.client_secret' => '']);
+        $this->assertFalse($identity->configured());
+    }
+
+    public function test_verified_sol_callback_without_membership_claim_allows_scanning(): void
+    {
+        Queue::fake();
+        config([
+            'quickscan.dev_sol_bypass' => false,
+            'quickscan.oidc.issuer' => 'https://issuer.example',
+            'quickscan.oidc.membership_claim' => '',
+            'quickscan.oidc.membership_values' => [],
+        ]);
+        $client = \Mockery::mock(SolClient::class);
+        $client->shouldReceive('authenticate')->once()->andReturn(true);
+        $client->shouldReceive('getVerifiedClaims')->once()->andReturn((object) ['sub' => 'user', 'name' => 'SOL user']);
+        $identity = \Mockery::mock(SolIdentity::class)->makePartial();
+        $identity->shouldReceive('client')->once()->andReturn($client);
+        $this->app->instance(SolIdentity::class, $identity);
+
+        $this->get('/auth/sol/callback?code=valid-code&state=valid-state')->assertRedirect('/#scan')
+            ->assertSessionHas('membership_verified_at');
+        $this->assertAuthenticated();
+        $this->assertSame(hash('sha256', "https://issuer.example\0user"), auth()->user()->oidc_key);
+        $this->postJson('/api/scans', $this->submission())->assertAccepted();
     }
 
     public function test_members_can_queue_isolated_scans_with_explicit_consent(): void

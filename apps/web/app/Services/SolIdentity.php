@@ -10,7 +10,8 @@ class SolIdentity
 
         return is_string($config['issuer']) && str_starts_with($config['issuer'], 'https://')
             && filled($config['client_id']) && filled($config['client_secret'])
-            && filled($config['membership_claim']) && count($config['membership_values']) > 0;
+            && ((blank($config['membership_claim']) && $config['membership_values'] === [])
+                || (filled($config['membership_claim']) && count($config['membership_values']) > 0));
     }
 
     public function client(): SolClient
@@ -30,6 +31,9 @@ class SolIdentity
     {
         $path = config('quickscan.oidc.membership_claim');
         $allowed = config('quickscan.oidc.membership_values');
+        if (blank($path) && $allowed === []) {
+            return true;
+        }
         if (! is_string($path) || $path === '' || $allowed === []) {
             return false;
         }

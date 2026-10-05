@@ -19,8 +19,12 @@ if [ "${APP_ENV:-local}" = production ]; then
         echo 'Production requires SESSION_SECURE_COOKIE=true.' >&2
         exit 1
     fi
-    if [ -z "${OIDC_ISSUER:-}" ] || [ -z "${OIDC_CLIENT_ID:-}" ] || [ -z "${OIDC_CLIENT_SECRET:-}" ] || [ -z "${OIDC_MEMBERSHIP_CLAIM:-}" ] || [ -z "${OIDC_MEMBERSHIP_VALUES:-}" ]; then
-        echo 'Production requires complete SOL issuer, client and membership configuration.' >&2
+    if [ -z "${OIDC_ISSUER:-}" ] || [ -z "${OIDC_CLIENT_ID:-}" ] || [ -z "${OIDC_CLIENT_SECRET:-}" ]; then
+        echo 'Production requires complete SOL issuer and client configuration.' >&2
+        exit 1
+    fi
+    if { [ -n "${OIDC_MEMBERSHIP_CLAIM:-}" ] && [ -z "${OIDC_MEMBERSHIP_VALUES:-}" ]; } || { [ -z "${OIDC_MEMBERSHIP_CLAIM:-}" ] && [ -n "${OIDC_MEMBERSHIP_VALUES:-}" ]; }; then
+        echo 'Set both SOL membership settings or leave both empty for login-only access.' >&2
         exit 1
     fi
 fi

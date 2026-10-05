@@ -43,27 +43,33 @@ OIDC_CLIENT_ID=registered-client-id
 OIDC_CLIENT_SECRET=configure-directly-on-server
 OIDC_REDIRECT_URI=https://quickscan.example/auth/sol/callback
 OIDC_SCOPES="openid profile"
-OIDC_MEMBERSHIP_CLAIM=organization.groups
-OIDC_MEMBERSHIP_VALUES=scouting-member
+OIDC_MEMBERSHIP_CLAIM=
+OIDC_MEMBERSHIP_VALUES=
 ```
 
-The claim/value above are illustrative, not known SOL claims. Obtain the actual
-membership claim, scopes and accepted values from your SOL administrator. The
-membership claim must be present in the **verified ID token**, not just userinfo.
+Leave both membership settings empty to allow every successfully authenticated
+SOL user. This verifies identity, not active Scouting membership. To restrict
+access to members, set both settings using the actual membership claim and accepted
+values from your SOL administrator (for example, `organization.groups` and
+`scouting-member` are illustrative, not known SOL claims). Obtain any required
+scopes from the administrator too. The membership claim must be present in the
+**verified ID token**, not just userinfo.
 Dot notation supports nested claims. A scalar string or array of strings is
-matched strictly against the comma-separated allowed values. Missing configuration,
-missing claims and non-members are denied. An email address is not membership proof.
+matched strictly against the comma-separated allowed values. Partial membership
+configuration is rejected; when membership checks are enabled, missing claims and
+non-members are denied. An email address is not membership proof.
 
 The OIDC library validates token signature/JWKS, issuer, audience, expiration,
 state and nonce. S256 PKCE is used when advertised by the provider. Only the
 authorization-code callback is accepted. OIDC state uses Laravel's database
 session, not a separate native PHP session. Account identity is a hash of issuer
-and subject; email is not used to merge identities. Membership is rechecked on
-login and the local session expires after two hours; this is not continuous SOL
+and subject; email is not used to merge identities. Membership, when configured,
+is rechecked on login and the local session expires after two hours; this is not continuous SOL
 revocation checking. Logout ends the local app session, not all SOL sessions.
 
-Test a real member, non-member, denied consent, expired token and replayed callback
-against the organization's provider before production acceptance.
+Test a real SOL login, denied consent, expired token and replayed callback against
+the organization's provider before production acceptance. If membership checks are
+enabled, also test a member and a non-member.
 
 ## Development Without SOL
 
