@@ -19,7 +19,7 @@ services:
       SESSION_DRIVER: database
       CACHE_STORE: database
     ports:
-      - "127.0.0.1:8000:80"
+      - "127.0.0.1:8001:80"
     volumes:
       - quickscan-storage:/var/www/quickscan/apps/web/storage
     init: true
