@@ -2,14 +2,29 @@ services:
   quickscan:
     image: ${QUICKSCAN_IMAGE:-quickscan:production}
     build: .
-    env_file:
-      - apps/web/.env.production
     environment:
+      APP_NAME: "Scouting Website Quickscan"
       APP_ENV: production
+      APP_KEY: ${APP_KEY:?Set APP_KEY in the stack environment}
       APP_DEBUG: "false"
+      APP_URL: ${APP_URL:?Set APP_URL to the public HTTPS origin}
+      APP_LOCALE: nl
+      APP_FALLBACK_LOCALE: en
       DEV_SOL_BYPASS: "false"
       SESSION_SECURE_COOKIE: "true"
       SESSION_ENCRYPT: "true"
+      SESSION_LIFETIME: "120"
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:?Set OIDC_ISSUER in the stack environment}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID in the stack environment}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Set OIDC_CLIENT_SECRET in the stack environment}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-${APP_URL}/auth/sol/callback}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile}
+      OIDC_MEMBERSHIP_CLAIM: ${OIDC_MEMBERSHIP_CLAIM:-}
+      OIDC_MEMBERSHIP_VALUES: ${OIDC_MEMBERSHIP_VALUES:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GOOGLE_PAGESPEED_API_KEY: ${GOOGLE_PAGESPEED_API_KEY:-}
       LOG_CHANNEL: stderr
       LOG_LEVEL: info
       DB_CONNECTION: sqlite

@@ -112,6 +112,20 @@ access remain mandatory. Admin rights cannot be assigned through scan submission
 
 Use `docker-compose.production.yml` as a standalone Compose file and start from
 `apps/web/.env.production.example`, keeping real secrets in `apps/web/.env.production`.
+For CLI deployment, supply it as the interpolation environment:
+
+```sh
+docker compose --env-file apps/web/.env.production -f docker-compose.production.yml up -d --build
+```
+
+For a Portainer Git stack, set the Compose path to `docker-compose.production.yml`
+and enter the variables in Portainer's **Environment variables** section instead.
+No repository `.env` file or environment-file bind mount is required. Set `APP_KEY`
+(keep the same key across deployments), `APP_URL` (public HTTPS origin),
+`OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. Optionally set the AI API
+keys, model, and `TRUSTED_PROXIES` using the production example as a reference.
+Leave both membership settings empty for verified SOL login-only access.
+
 The production file forces safe environment/session defaults, binds only to
 localhost, caps resources and enables the Chromium sandbox using the pinned
 Playwright seccomp profile. Do not combine it with the local Compose file.
@@ -120,7 +134,7 @@ queue retry window. See the [launch runbook](PRODUCTION_READINESS.md) before pub
 
 Set `APP_ENV=production`, `APP_DEBUG=false`, `APP_URL` to the public HTTPS origin,
 `SESSION_SECURE_COOKIE=true`, `DEV_SOL_BYPASS=false`, a persistent `APP_KEY`, and the verified SOL settings
-in `apps/web/.env`. Put the container behind a TLS reverse proxy, restrict scanner
+in the production environment. Put the container behind a TLS reverse proxy, restrict scanner
 egress from private, loopback, link-local, and metadata networks, and persist the
 `quickscan-storage` volume. Do not publish the repository root, `.env`, or storage.
 
