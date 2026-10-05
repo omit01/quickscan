@@ -1,0 +1,31 @@
+services:
+  quickscan:
+    build: .
+    env_file:
+      - apps/web/.env
+    environment:
+      APP_DEBUG: "false"
+      DB_CONNECTION: sqlite
+      DB_DATABASE: /var/www/quickscan/apps/web/storage/app/quickscan.sqlite
+      QUEUE_CONNECTION: database
+      SESSION_DRIVER: database
+      CACHE_STORE: database
+    ports:
+      - "8000:80"
+    volumes:
+      - quickscan-storage:/var/www/quickscan/apps/web/storage
+      - ./apps/web/.env:/var/www/quickscan/apps/web/.env
+    init: true
+    security_opt:
+      - seccomp:./docker/chromium-seccomp.json
+    shm_size: 256m
+    stop_grace_period: 960s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  quickscan-storage:

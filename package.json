@@ -1,0 +1,14 @@
+{
+  "name": "scouting-website-quickscan",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run build -w @quickscan/contracts -w @quickscan/site-policy -w @quickscan/worker -w @quickscan/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,10 @@
+.git
+**/node_modules
+**/vendor
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+apps/web/bootstrap/cache/*.php
+apps/web/storage
+apps/web/public/hot

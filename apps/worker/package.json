@@ -1,0 +1,22 @@
+{
+  "name": "@quickscan/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build -w @quickscan/contracts -w @quickscan/site-policy && npm run build && node --test dist/capture.test.js"
+  },
+  "dependencies": {
+    "@quickscan/contracts": "*",
+    "@quickscan/site-policy": "*",
+    "playwright": "1.63.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
