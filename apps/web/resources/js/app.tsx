@@ -261,9 +261,9 @@ function App() {
 					</form>
 					{signedIn && <>
 						<p className="welcome">Aangemeld als {page.user?.name}.</p>
-						{page.scanLimits && <div className="scan-limits-info" style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#f5f5f5', borderRadius: '0.5rem', fontSize: '0.875rem', textAlign: 'center' }}>
+						{page.scanLimits && <div className="scan-limits-info">
 							{page.scanLimits.isAdmin ? <>Admin · onbeperkt scannen. Vandaag <strong>{page.scanLimits.userScansToday}</strong> scans gestart.</> : <>Je hebt vandaag <strong>{page.scanLimits.userScansToday}</strong> van je <strong>{page.scanLimits.userScansLimit}</strong> scans gebruikt.</>}
-							{!page.scanLimits.isAdmin && page.scanLimits.userScansToday >= 8 && <div style={{ marginTop: '0.5rem', color: '#d97706' }}>Je bent dicht bij je dagelijkse limiet.</div>}
+							{!page.scanLimits.isAdmin && page.scanLimits.userScansToday >= 8 && <div className="scan-limits-warning">Je bent dicht bij je dagelijkse limiet.</div>}
 						</div>}
 					</>}
 					<a href="#checks" className="discover" {...hoverHint('We kijken verder dan ‘hij doet het op mijn laptop’.')}>Wat bekijken we precies?<ArrowDown size={18} aria-hidden="true" /></a>
