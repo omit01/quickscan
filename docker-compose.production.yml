@@ -44,7 +44,7 @@ services:
     init: true
     security_opt:
       - seccomp:./docker/chromium-seccomp.json
-    stop_grace_period: 960s
+    stop_grace_period: 30s
     restart: unless-stopped
     shm_size: 256m
     mem_limit: 2g
