@@ -169,6 +169,21 @@ generated temporary report JSON is removed after the job commits its results.
 Captured pages and screenshots remain private scan artifacts; apply a separate
 retention policy to those files.
 
+### Shared Scores And Top Ten
+
+Reports show a server-calculated score: 50% average assessed technical score
+and 50% average AI criterion score converted from 1-5 to a percentage. Unavailable
+technical checks and AI criteria with insufficient evidence are excluded. Both
+categories must contain an assessed result; otherwise no total score can be shared.
+
+Sharing is opt-in through the owner's report, with confirmation before publication.
+Only the site title, URL and score appear publicly next to the FAQ. Reports and
+account details remain private. The top ten is ordered by descending score, with
+domain as the tie-breaker. Each normalized domain has one listing; the last shared
+scan replaces its previous listing. New scans are not automatically published.
+The `shared_scores` migration is applied by Docker startup or `php artisan migrate`
+from `apps/web`.
+
 ### Action Priorities
 
 "Begin hiermee" ranks technical and AI findings together, without another AI

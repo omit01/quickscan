@@ -100,6 +100,26 @@ class ScanController extends Controller
         return response()->json($scan->refresh(), 202)->header('Cache-Control', 'no-store');
     }
 
+    public function share(Request $request, Scan $scan)
+    {
+        abort_unless($scan->user_id === $request->user()->id, 404);
+        abort_unless($scan->status === 'completed' && $scan->results !== null, 422);
+        $score = $scan->weightedScore();
+        if ($score === null) {
+            throw ValidationException::withMessages(['score' => 'Delen kan pas als techniek en bezoekerservaring allebei beoordeeld zijn.']);
+        }
+
+        DB::table('shared_scores')->upsert([
+            'site_key' => $scan->site_key,
+            'scan_id' => $scan->id,
+            'title' => $scan->results['home']['title'] ?: $scan->site_key,
+            'url' => $scan->url,
+            'score' => $score,
+        ], ['site_key'], ['scan_id', 'title', 'url', 'score']);
+
+        return response()->json(['shared' => true, 'score' => $score])->header('Cache-Control', 'no-store');
+    }
+
     public function report(Request $request, Scan $scan, string $format)
     {
         abort_unless($scan->user_id === $request->user()->id && $scan->status === 'completed', 404);
@@ -114,7 +134,11 @@ class ScanController extends Controller
         return response()->view('quickscan', ['pageData' => [
             'user' => ['name' => $request->user()->name],
             'csrfToken' => csrf_token(),
-            'report' => ['id' => $scan->id, 'url' => $scan->url, 'results' => $scan->results],
+            'report' => [
+                'id' => $scan->id, 'url' => $scan->url, 'results' => $scan->results,
+                'score' => $scan->weightedScore(),
+                'shared' => DB::table('shared_scores')->where('scan_id', $scan->id)->exists(),
+            ],
         ]])->header('Cache-Control', 'private, no-store')->header('X-Content-Type-Options', 'nosniff');
     }
 

@@ -17,6 +17,20 @@ class Scan extends Model
 
     protected $hidden = ['results', 'error_detail'];
 
+    public function weightedScore(): ?int
+    {
+        $technical = collect($this->results['technical'] ?? [])
+            ->filter(fn ($result) => $result['status'] !== 'unavailable');
+        $criteria = collect($this->results['ai']['criteria'] ?? [])
+            ->filter(fn ($result) => ! ($result['insufficientEvidence'] ?? false));
+
+        if ($technical->isEmpty() || $criteria->isEmpty()) {
+            return null;
+        }
+
+        return (int) round($technical->avg('score') * 0.5 + $criteria->avg('score') / 5 * 100 * 0.5);
+    }
+
     public function saveResults(array $results): void
     {
         $results = Arr::only($results, ['home', 'technical', 'ai', 'aiError', 'generatedAt']);

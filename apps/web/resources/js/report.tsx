@@ -1,4 +1,5 @@
-import { ArrowLeft, ArrowUpRight, Check, CircleAlert, CircleHelp, ShieldCheck, Sparkles, Printer } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft, ArrowUpRight, Check, CircleAlert, CircleHelp, ShieldCheck, Sparkles, Printer, Share2, LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -11,6 +12,7 @@ type CheckResult = { status: 'pass' | 'warning' | 'fail' | 'unavailable'; score:
 type Criterion = { score: number; toelichting: string; verbeterpunt: string; insufficientEvidence?: boolean };
 export type Report = {
 	id: string; url: string;
+	score: number | null; shared: boolean;
 	results: { home: { title: string | null; url: string }; technical: Record<string, CheckResult>; ai?: { criteria: Record<string, Criterion> } | null; aiError?: string | null; generatedAt: string };
 };
 
@@ -48,7 +50,10 @@ function Status({ result }: { result: CheckResult }) {
 	return <Badge variant="outline" className={`result-status status-${result.status}`}><state.icon size={14} aria-hidden="true" />{state.label}</Badge>;
 }
 
-export function ReportPage({ report }: { report: Report }) {
+export function ReportPage({ report, csrfToken }: { report: Report; csrfToken: string }) {
+	const [shared, setShared] = useState(report.shared);
+	const [sharing, setSharing] = useState(false);
+	const [shareError, setShareError] = useState('');
 	const { results } = report;
 	const technical = Object.entries(results.technical).sort(([, first], [, second]) => severity[first.status] - severity[second.status] || first.score - second.score);
 	const criteria = Object.entries(results.ai?.criteria ?? {});
@@ -62,6 +67,23 @@ export function ReportPage({ report }: { report: Report }) {
 		action: source === 'Techniek' ? guides[key]?.action ?? results.technical[key].detail : results.ai!.criteria[key].verbeterpunt,
 	}));
 
+	async function shareScore() {
+		if (!window.confirm('Wil je de sitenaam, websitelink en score openbaar delen voor de top 10? Je rapport en accountgegevens worden niet openbaar. Een eerder gedeelde score van deze website wordt vervangen.')) return;
+		setSharing(true);
+		setShareError('');
+		try {
+			const response = await fetch(`/api/scans/${report.id}/share`, {
+				method: 'POST', headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken },
+			});
+			if (response.status === 401 || response.status === 419) throw new Error('Je sessie is verlopen. Log opnieuw in via de homepage.');
+			const result = await response.json();
+			if (!response.ok) throw new Error(result.errors ? String(Object.values(result.errors).flat()[0]) : 'Delen is niet gelukt. Probeer opnieuw.');
+			setShared(true);
+		} catch (failure) {
+			setShareError(failure instanceof Error ? failure.message : 'Geen verbinding. Probeer opnieuw.');
+		} finally { setSharing(false); }
+	}
+
 	return <>
 		<a className="skip-link" href="#report-results">Naar de resultaten</a>
 		<header className="site-header"><div className="container header-inner">
@@ -73,6 +95,14 @@ export function ReportPage({ report }: { report: Report }) {
 				<div className="report-meta"><Badge variant="outline">Jouw rapport</Badge><time dateTime={results.generatedAt}>{new Date(results.generatedAt).toLocaleString('nl-NL', { dateStyle: 'long', timeStyle: 'short' })}</time></div>
 				<h1>{results.home.title || new URL(report.url).hostname}</h1>
 				<a className="report-site" href={report.url} target="_blank" rel="noopener noreferrer">{report.url}<ArrowUpRight size={18} aria-hidden="true" /></a>
+				<div className="report-overall">
+					<div><h2>Gewogen score</h2><strong>{report.score === null ? '-' : `${report.score}%`}</strong><p>{report.score === null ? 'Nog geen totaalscore: techniek en bezoekerservaring moeten allebei beoordeeld zijn.' : '50% techniek en 50% bezoekerservaring. Niet-beoordeelde onderdelen tellen niet mee.'}</p></div>
+					{report.score !== null && <div className="report-share">
+						<Button onClick={() => void shareScore()} disabled={sharing || shared}>{sharing ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : shared ? <Check aria-hidden="true" /> : <Share2 aria-hidden="true" />}{sharing ? 'Score delen...' : shared ? 'Score gedeeld' : 'Deel deze score'}</Button>
+						{shared ? <p role="status">Je score is gedeeld. <a href="/#top-sites">Bekijk de top 10<ArrowUpRight size={14} aria-hidden="true" /></a></p> : <p>Alleen je sitenaam, link en score worden openbaar.</p>}
+						{shareError && <p role="alert">{shareError}</p>}
+					</div>}
+				</div>
 				<div className="report-summary">
 					<Card className="summary-good"><CardHeader><h2>Techniek op orde</h2></CardHeader><CardContent><strong>{passed}<span> / {assessed.length}</span></strong><p>{technical.length - assessed.length} niet beoordeeld</p></CardContent></Card>
 					<Card className="summary-attention"><CardHeader><h2>Aandachtspunten</h2></CardHeader><CardContent><strong>{assessed.length - passed}</strong><p>Technische verbeterpunten</p></CardContent></Card>

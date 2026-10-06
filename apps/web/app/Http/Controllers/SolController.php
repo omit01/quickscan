@@ -37,6 +37,7 @@ class SolController extends Controller
 
     private function authenticate(Request $request, SolIdentity $identity, bool $callback)
     {
+        $hasOidcSession = $request->session()->has('oidc');
         try {
             $client = $identity->client();
             if (! $client->authenticate() || ! $callback) {
@@ -63,7 +64,26 @@ class SolController extends Controller
         } catch (HttpResponseException $redirect) {
             throw $redirect;
         } catch (Throwable $error) {
-            Log::warning('SOL authentication failed', ['type' => get_class($error)]);
+            $tokenError = isset($client) ? ($client->getTokenResponse()->error ?? null) : null;
+            $reason = match ($error->getMessage()) {
+                'Unable to determine state' => 'state_mismatch',
+                'User did not authorize openid scope.' => 'missing_id_token',
+                'Unable to verify JWT claims' => 'invalid_id_token_claims',
+                'Unable to verify signature', 'Invalid JWT signature' => 'invalid_id_token_signature',
+                'Got response: invalid_client' => 'invalid_client',
+                'Got response: invalid_grant' => 'invalid_grant',
+                'Authentication was not completed.' => 'authentication_incomplete',
+                default => str_starts_with($error->getMessage(), 'Curl error:') ? 'provider_connection_failed' : 'provider_or_protocol_error',
+            };
+            if (in_array($tokenError, ['invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client', 'unsupported_grant_type', 'invalid_scope', 'server_error', 'temporarily_unavailable'], true)) {
+                $reason = $tokenError;
+            }
+            Log::warning('SOL authentication failed', [
+                'type' => get_class($error),
+                'reason' => $reason,
+                'callback' => $callback,
+                'oidc_session_present' => $hasOidcSession,
+            ]);
             $request->session()->forget('oidc');
 
             return redirect('/')->with('auth_error', 'Aanmelden via SOL 3.0 is niet gelukt. Probeer opnieuw.');

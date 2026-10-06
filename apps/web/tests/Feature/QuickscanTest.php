@@ -18,6 +18,107 @@ class QuickscanTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_weighted_score_excludes_unassessed_results_and_requires_both_categories(): void
+    {
+        $scan = new Scan(['results' => [
+            'technical' => [
+                'https' => ['status' => 'pass', 'score' => 100],
+                'mobile' => ['status' => 'fail', 'score' => 0],
+                'pagespeed' => ['status' => 'unavailable', 'score' => 0],
+            ],
+            'ai' => ['criteria' => [
+                'beeldgebruik' => ['score' => 5],
+                'taalgebruik' => ['score' => 3],
+                'actualiteit' => ['score' => 1, 'insufficientEvidence' => true],
+            ]],
+        ]]);
+        $this->assertSame(65, $scan->weightedScore());
+        $scan->results = ['technical' => ['https' => ['status' => 'pass', 'score' => 100]]];
+        $this->assertNull($scan->weightedScore());
+        $scan->results = ['ai' => ['criteria' => ['beeldgebruik' => ['score' => 5]]]];
+        $this->assertNull($scan->weightedScore());
+        $scan->results = null;
+        $this->assertNull($scan->weightedScore());
+    }
+
+    public function test_sharing_publishes_only_server_score_and_one_entry_per_website(): void
+    {
+        $this->member();
+        $this->withoutVite();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+            'url' => 'https://www.example.com', 'site_key' => 'example.com', 'status' => 'completed',
+            'results' => [
+                'home' => ['title' => 'Scouting Voorbeeld', 'url' => 'https://www.example.com'],
+                'technical' => ['https' => ['status' => 'pass', 'score' => 100, 'detail' => 'Privaat advies']],
+                'ai' => ['criteria' => ['beeldgebruik' => ['score' => 3]]],
+                'generatedAt' => now()->toISOString(),
+            ],
+        ]);
+        $this->get('/')->assertViewHas('pageData', fn ($data) => count($data['topSites']) === 0);
+        $this->postJson('/api/scans/'.$scan->id.'/share', ['score' => 100, 'url' => 'https://other.example'])
+            ->assertOk()->assertExactJson(['shared' => true, 'score' => 80]);
+        $this->postJson('/api/scans/'.$scan->id.'/share')->assertOk();
+        $this->assertDatabaseCount('shared_scores', 1);
+        $this->assertDatabaseHas('shared_scores', ['site_key' => 'example.com', 'score' => 80, 'url' => $scan->url]);
+        $this->get('/api/scans/'.$scan->id.'/report.html')->assertViewHas('pageData', fn ($data) => $data['report']['score'] === 80 && $data['report']['shared']);
+
+        $newScan = $scan->replicate();
+        $newScan->id = (string) Str::uuid();
+        $newScan->url = 'http://example.com';
+        $newScan->save();
+        $this->postJson('/api/scans/'.$newScan->id.'/share')->assertOk();
+        $this->assertDatabaseCount('shared_scores', 1);
+        $this->assertDatabaseHas('shared_scores', ['scan_id' => $newScan->id, 'url' => $newScan->url]);
+
+        auth()->logout();
+        $this->get('/')->assertOk()->assertViewHas('pageData', function ($data) use ($newScan) {
+            return (array) $data['topSites'][0] === ['title' => 'Scouting Voorbeeld', 'url' => $newScan->url, 'score' => 80];
+        });
+        $this->get('/api/scans/'.$scan->id.'/report.html')->assertRedirect('/auth/sol');
+        $this->postJson('/api/scans/'.$scan->id.'/share')->assertUnauthorized();
+        $this->member();
+        $this->postJson('/api/scans/'.$scan->id.'/share')->assertNotFound();
+    }
+
+    public function test_sharing_rejects_pending_failed_and_incomplete_scans(): void
+    {
+        $this->member();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+            'url' => 'https://example.com', 'site_key' => 'example.com',
+        ]);
+        foreach (['queued', 'running', 'failed', 'completed'] as $status) {
+            $scan->update(['status' => $status]);
+            $this->postJson('/api/scans/'.$scan->id.'/share')->assertUnprocessable();
+        }
+        $scan->update(['results' => ['technical' => ['https' => ['status' => 'pass', 'score' => 100]]]]);
+        $this->postJson('/api/scans/'.$scan->id.'/share')->assertUnprocessable();
+        $this->assertDatabaseCount('shared_scores', 0);
+    }
+
+    public function test_public_top_ten_is_ranked_limited_and_contains_no_private_report_data(): void
+    {
+        $this->member();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+            'url' => 'https://example.com', 'site_key' => 'example.com',
+        ]);
+        for ($index = 0; $index < 12; $index++) {
+            DB::table('shared_scores')->insert([
+                'site_key' => 'site'.$index.'.example', 'scan_id' => $scan->id,
+                'title' => 'Scouting '.$index, 'url' => 'https://site'.$index.'.example', 'score' => $index * 8,
+            ]);
+        }
+        auth()->logout();
+        $this->withoutVite();
+        $this->get('/')->assertOk()->assertViewHas('pageData', function ($data) {
+            $sites = $data['topSites'];
+            return count($sites) === 10 && $sites[0]->score === 88 && $sites[9]->score === 16
+                && array_keys((array) $sites[0]) === ['title', 'url', 'score'];
+        });
+    }
+
     public function test_production_responses_have_security_headers_and_matching_script_nonce(): void
     {
         $this->withoutVite();
@@ -248,6 +349,40 @@ class QuickscanTest extends TestCase
         $this->postJson('/api/scans', [...$this->submission(), 'authorizedToScan' => false])->assertUnprocessable();
         $this->postJson('/api/scans', [...$this->submission(), 'url' => 'http://127.0.0.1'])->assertUnprocessable();
         $this->postJson('/api/scans', [...$this->submission(), 'url' => 'https://user:pass@example.com'])->assertUnprocessable();
+    }
+
+    public function test_failed_sol_callback_logs_safe_diagnostics_and_clears_oidc_session(): void
+    {
+        config(['quickscan.dev_sol_bypass' => false]);
+        foreach ([
+            ['Unable to determine state', 'state_mismatch', null],
+            ['Unable to verify JWT claims', 'invalid_id_token_claims', null],
+            ['Curl error: (60) certificate verification failed', 'provider_connection_failed', null],
+            ['Provider rejected secret-value and token-value', 'provider_or_protocol_error', null],
+            ['Provider rejected secret-value', 'invalid_client', 'invalid_client'],
+            ['Provider rejected private-code', 'invalid_grant', 'invalid_grant'],
+            ['Provider rejected private-code', 'provider_or_protocol_error', 'private-provider-error'],
+        ] as [$message, $reason, $tokenError]) {
+            $client = \Mockery::mock(SolClient::class);
+            $client->shouldReceive('authenticate')->once()->andThrow(new \Jumbojett\OpenIDConnectClientException($message));
+            $client->shouldReceive('getTokenResponse')->once()->andReturn($tokenError === null ? null : (object) ['error' => $tokenError]);
+            $identity = \Mockery::mock(SolIdentity::class);
+            $identity->shouldReceive('client')->once()->andReturn($client);
+            $this->app->instance(SolIdentity::class, $identity);
+            \Illuminate\Support\Facades\Log::shouldReceive('warning')->once()->with('SOL authentication failed', [
+                'type' => \Jumbojett\OpenIDConnectClientException::class,
+                'reason' => $reason,
+                'callback' => true,
+                'oidc_session_present' => true,
+            ]);
+
+            $this->withSession(['oidc' => ['state' => 'private-state']])
+                ->get('/auth/sol/callback?code=private-code&state=private-state')
+                ->assertRedirect('/')
+                ->assertSessionHas('auth_error')
+                ->assertSessionMissing('oidc');
+            $this->assertGuest();
+        }
     }
 
     public function test_other_users_cannot_read_scans_or_reports(): void
