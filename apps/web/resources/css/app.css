@@ -305,8 +305,8 @@
 .report-actions li { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
 .action-number { font-family: var(--font-head); font-size: 30px; line-height: 1.2; }
 .report-actions li > div { min-width: 0; }
-.report-actions h3 { font-family: var(--font-sans); font-weight: 700; font-size: 17px; margin: 12px 0 8px; white-space: nowrap; }
-.report-actions p { font-size: 14px; margin: 0; overflow-wrap: anywhere; white-space: nowrap; }
+.report-actions h3 { font-family: var(--font-sans); font-weight: 700; font-size: 17px; margin: 12px 0 8px; overflow-wrap: anywhere; white-space: normal; }
+.report-actions p { font-size: 14px; margin: 0; overflow-wrap: anywhere; white-space: normal; }
 .report-results { padding-block: 40px; }
 .report-results [data-slot=tabs] { flex-direction: column; gap: 16px; }
 .report-results [data-slot=tabs-list] { max-width: 100%; height: auto; }
