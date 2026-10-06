@@ -115,7 +115,7 @@ Use `docker-compose.production.yml` as a standalone Compose file and start from
 For CLI deployment, supply it as the interpolation environment:
 
 ```sh
-docker compose --env-file apps/web/.env.production -f docker-compose.production.yml up -d --build
+docker compose --env-file apps/web/.env.production -f docker-compose.production.yml up -d
 ```
 
 For a Portainer Git stack, set the Compose path to `docker-compose.production.yml`
@@ -125,6 +125,44 @@ No repository `.env` file or environment-file bind mount is required. Set `APP_K
 `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. Optionally set the AI API
 keys, model, and `TRUSTED_PROXIES` using the production example as a reference.
 Leave both membership settings empty for verified SOL login-only access.
+
+### Prebuilt Images And Portainer
+
+The [Publish Docker Image workflow](.github/workflows/docker.yml) builds the existing
+Dockerfile on every push to `main`, or manually from GitHub's **Actions** tab.
+It publishes `ghcr.io/omit01/quickscan:main` and `sha-<full-commit-sha>` tags to
+GitHub Container Registry, with GitHub Actions layer caching. The image includes
+Laravel dependencies, compiled frontend/scanner assets and Playwright Chromium.
+Images target Linux amd64 (x86-64); ARM hosts need a separately supported build.
+Publishing uses the built-in `GITHUB_TOKEN`; no registry secret is needed in CI.
+
+Before the first production deployment:
+
+1. Push the workflow to `main` and wait for **Publish Docker Image** to succeed.
+2. In GitHub's package settings for `quickscan`, make the package public for
+  anonymous pulls. Packages are private by default, even in a public repository.
+  Alternatively, add a `ghcr.io` registry in Portainer using a GitHub username
+  and a classic PAT with `read:packages` and access to the package. Select that
+  registry when deploying the stack. For CLI pulls of a private image, use
+  `docker login ghcr.io` and enter the PAT directly at its password prompt.
+3. Deploy or update the Git stack with the production Compose path and existing
+  environment variables. Production Compose has no `build:` instruction and
+  always pulls the selected image. Enable Portainer's **Re-pull image** option
+  when updating if your version exposes it.
+
+For later releases, wait for image publication before redeploying. Do not trigger
+Portainer directly on the Git push: it can pull the previous `main` image before
+the build finishes. The workflow publishes only; it does not automatically
+redeploy Portainer. Keep the same stack name, storage volume and `APP_KEY`.
+Set `QUICKSCAN_IMAGE=ghcr.io/omit01/quickscan:sha-<full-commit-sha>` to pin a release
+or roll back the application image; database migrations are not rolled back.
+
+Redeploys now pull a prebuilt image instead of compiling dependencies on the host.
+Measure from stack update to a healthy container: 10-20 seconds is a target for
+cached layers and fast startup, not a guarantee. The first download can be large,
+startup applies migrations, and an active scan can delay shutdown by up to the
+configured 960-second grace period. Local development still uses
+`docker compose up --build`.
 
 The production file forces safe environment/session defaults, binds only to
 localhost, caps resources and enables the Chromium sandbox using the pinned

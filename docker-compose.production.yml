@@ -1,7 +1,7 @@
 services:
   quickscan:
-    image: ${QUICKSCAN_IMAGE:-quickscan:production}
-    build: .
+    image: ${QUICKSCAN_IMAGE:-ghcr.io/omit01/quickscan:main}
+    pull_policy: always
     environment:
       APP_NAME: "Scouting Website Quickscan"
       APP_ENV: production
