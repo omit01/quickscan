@@ -28,7 +28,7 @@ type TooltipPos = { x: number; y: number; visible: boolean; text?: string };
 declare global { interface Window { quickscan: PageData } }
 const page = window.quickscan;
 const draftKey = 'quickscan-submission';
-const tooltipTotal = 11;
+const tooltipTotal = 10;
 const makerHint = 'Timo Klabbers. Werkt ook zonder wifi, maar minder graag.';
 function readDraft(): Draft {
 	try {
