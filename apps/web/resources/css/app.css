@@ -1,8 +1,80 @@
 @import 'tailwindcss';
-@import '@fontsource/archivo-black/latin-400.css';
-@import '@fontsource/space-grotesk/latin-400.css';
-@import '@fontsource/space-grotesk/latin-500.css';
-@import '@fontsource/space-grotesk/latin-700.css';
+
+@font-face {
+    font-family: 'Archivo Black';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('@fontsource/archivo-black/files/archivo-black-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Space Grotesk';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('@fontsource/space-grotesk/files/space-grotesk-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Space Grotesk';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('@fontsource/space-grotesk/files/space-grotesk-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Space Grotesk';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('@fontsource/space-grotesk/files/space-grotesk-latin-700-normal.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Archivo Black Fallback';
+    src: local('Arial Bold');
+    font-style: normal;
+    font-weight: 400;
+    size-adjust: 116.0280%;
+    ascent-override: 75.6714%;
+    descent-override: 18.0991%;
+    line-gap-override: 0%;
+}
+
+@font-face {
+    font-family: 'Space Grotesk Fallback';
+    src: local('Arial');
+    font-style: normal;
+    font-weight: 400;
+    size-adjust: 108.5853%;
+    ascent-override: 90.6200%;
+    descent-override: 26.8913%;
+    line-gap-override: 0%;
+}
+
+@font-face {
+    font-family: 'Space Grotesk Fallback';
+    src: local('Arial Bold');
+    font-style: normal;
+    font-weight: 500;
+    size-adjust: 101.8297%;
+    ascent-override: 96.6319%;
+    descent-override: 28.6753%;
+    line-gap-override: 0%;
+}
+
+@font-face {
+    font-family: 'Space Grotesk Fallback';
+    src: local('Arial Bold');
+    font-style: normal;
+    font-weight: 700;
+    size-adjust: 101.9893%;
+    ascent-override: 96.4807%;
+    descent-override: 28.6305%;
+    line-gap-override: 0%;
+}
 
 @custom-variant dark (&:is(.dark *));
 
@@ -15,8 +87,8 @@
 @source "../../components/**/*.tsx";
 
 @theme {
-    --font-sans: 'Space Grotesk', sans-serif;
-    --font-head: 'Archivo Black', sans-serif;
+    --font-sans: 'Space Grotesk', 'Space Grotesk Fallback', sans-serif;
+    --font-head: 'Archivo Black', 'Archivo Black Fallback', sans-serif;
 }
 
 :root {
@@ -278,6 +350,10 @@
 .faq-list { width: 100%; margin-inline: auto; }
 .faq-list [data-slot=accordion-item] { border-width: 0 0 2px; border-radius: 0; box-shadow: none; background: transparent; }
 .faq-list [data-slot=accordion-trigger] { padding-block: 22px; text-align: left; font-family: var(--font-sans); font-size: 17px; font-weight: 700; }
+.faq-list summary { list-style: none; }
+.faq-list summary::-webkit-details-marker { display: none; }
+.faq-list details[open] summary { background: color-mix(in oklab, var(--muted) 40%, transparent); }
+.faq-list details[open] summary svg { transform: rotate(180deg); }
 .faq-list [data-slot=accordion-content] { font-size: 15px; max-width: 860px; line-height: 1.75; }
 .closing-band { background: var(--chart-3); border-block: 2px solid; padding-block: 32px; }
 .closing-band .container { display: flex; justify-content: space-between; align-items: center; gap: 24px; }

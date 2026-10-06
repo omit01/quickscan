@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent, type FocusEvent, type KeyboardEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent, type MouseEvent, type FocusEvent, type KeyboardEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import confetti from 'canvas-confetti';
-import { ArrowDown, ArrowRight, ArrowUpRight, Check, FileText, Globe2, Linkedin, LoaderCircle, LockKeyhole, LogOut, MonitorSmartphone, Search, ShieldCheck, Sparkles } from 'lucide-react';
-import { ReportPage, type Report } from './report';
+import { ArrowDown, ArrowRight, ArrowUpRight, Check, ChevronDown, FileText, Globe2, Linkedin, LoaderCircle, LockKeyhole, LogOut, MonitorSmartphone, Search, ShieldCheck, Sparkles } from 'lucide-react';
+import type { Report } from './report';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,8 +10,9 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+
+const ReportPage = lazy(() => import('./report').then(module => ({ default: module.ReportPage })));
 
 type Scan = { id: string; url: string; status: string; phase: string; error?: string | null; created_at: string };
 type Draft = { url: string; authorized: boolean; active: boolean; formSubmissionTesting: boolean; pending: boolean };
@@ -92,11 +92,11 @@ function App() {
 		if (discoveredHints.size !== tooltipTotal || celebratedHints.current) return;
 		celebratedHints.current = true;
 		const theme = getComputedStyle(document.documentElement);
-		void confetti({
+		void import('canvas-confetti').then(({ default: confetti }) => confetti({
 			particleCount: 80, spread: 70, origin: { y: 0.6 },
 			colors: ['--primary', '--chart-3', '--chart-5', '--chart-2', '--border'].map(color => theme.getPropertyValue(color).trim()),
 			shapes: ['square'], scalar: 1.2, zIndex: 100, disableForReducedMotion: true,
-		});
+		})).catch(() => {});
 	}, [discoveredHints.size]);
 
 	function hoverHint(text: string) {
@@ -289,7 +289,7 @@ function App() {
 			<section className="methodology-band" aria-labelledby="methodology-title"><div className="container"><div className="section-heading"><div><p className='eyebrow'>NIET UIT DE LUCHT GEGREPEN</p><h2 id="methodology-title">Hoe de adviezen tot stand zijn gekomen.</h2></div><p>De Quickscan is gemaakt samen met communicatie-experts en tips van de belangrijkste bedrijven. Zo wordt jouw website extra goed beoordeeld.</p></div><div className="methodology-content"><div className="methodology-item"><h3>Technische adviezen</h3><p>De technische controles zijn gebaseerd op best-practices van <strong>Google</strong> en <strong>Mozilla</strong>. Zij stellen wereldwijd standaarden op voor veiligheid, snelheid en toegankelijkheid. Jouw website wordt langs hun lat gelegd.</p></div><div className="methodology-item"><h3>Communicatieadviezen</h3><p>Voor de beoordeling van inhoud en gebruikerservaring heb ik gesproken met <strong>vrijwilligers en beroepskrachten</strong> van Scouting Nederland. Zij delen wat een goed werkende Scoutingwebsite nodig heeft: helder communiceren over wie je bent, wat je aanbiedt, en hoe anderen kunnen meedoen.</p></div><div className="methodology-item"><h3>Onderzoek</h3><p>Deze tips zijn ontwikkeld voor de <strong>Communicatiedag van Scouting Nederland</strong> op 8 november 2026 op het LSC. Na de feedback en inzichten van die dag heb ik een prototype van deze tool ontwikkeld en is die nu voor jou beschikbaar.</p></div></div></div></section>
 			<section className="about-band" aria-labelledby="about-title"><div className="container"><div className="about-content"><div className="about-text"><h2 id="about-title">Van de maker</h2><p>Ik ben al sinds jongs af aan bezig met programmeren. Zoals bij veel ontwikkelaars is dat ooit begonnen met websites. Sinds 2020 ben ik als vrijwilliger voor Scouting Nederland actief en ontwikkel ik websites en webapplicaties. De kans is groot dat jij, als Scout, een van die websites wel eens hebt gebruikt.<br /><br /> Voor de landelijke communicatiedag in november 2026 is mij gevraagd of ik een presentatie wilde geven over websites. Waar vaak de techniek wordt uitgelicht, heb ik voor iets anders gekozen. Ik heb een ronde gebeld en veel mensen met een communicatie achtergrond gevraagd om hun beste tip, mooiste website en adviezen te delen. Daar heb ik een presentatie van gemaakt met 10 tips voor een betere website, die je eigenlijk gelijk kan uitvoeren. Om de deelnemers van de workshop gelijk iets mee te geven heb ik deze tool ontwikkeld. Met AI controleert de tool de website op de 10 tips uit de presentatie. Daarnaast heb ik allerlei technische checks toegevoegd, omdat dat uiteindelijk mijn eigen kracht is. De tool die daar uitkwam, is nu beschikbaar voor alle scouts in Nederland. <br /><br />Veel succes met jouw website. <br /> <b>-Timo Klabbers</b></p><Button variant="outline" size="xs" asChild><a href="http://linkedin.com/in/timo-klabbers" target="_blank" rel="noopener noreferrer"><Linkedin aria-hidden="true" size={14} />LinkedIn</a></Button></div><div className="about-graphic"><div className="profile-wrapper" onMouseEnter={() => setTooltipPos({...tooltipPos, visible: true})} onMouseLeave={() => setTooltipPos({...tooltipPos, visible: false})} onMouseMove={(e) => setTooltipPos({x: e.clientX + 12, y: e.clientY + 12, visible: true})}><img src="profile-bw-min.webp" alt="Timo Klabbers" className="profile-image" width="280" height="280" /></div></div></div></div></section>
 			<div className="faq-top-sites container">
-				<section id="faq" className="faq-section" aria-labelledby="faq-title"><div className="section-heading"><div><p className="eyebrow">GOED OM TE WETEN</p><h2 id="faq-title">Nog een vraag?</h2></div><p>Over de scan, je gegevens en wat je van het rapport kunt verwachten.</p></div><Accordion type="single" collapsible className="faq-list">{faqs.map(([question, answer], index) => <AccordionItem value={`faq-${index}`} key={question}><AccordionTrigger>{question}</AccordionTrigger><AccordionContent>{answer}</AccordionContent></AccordionItem>)}</Accordion></section>
+				<section id="faq" className="faq-section" aria-labelledby="faq-title"><div className="section-heading"><div><p className="eyebrow">GOED OM TE WETEN</p><h2 id="faq-title">Nog een vraag?</h2></div><p>Over de scan, je gegevens en wat je van het rapport kunt verwachten.</p></div><div className="faq-list flex flex-col gap-3">{faqs.map(([question, answer]) => <details name="quickscan-faq" data-slot="accordion-item" key={question}><summary data-slot="accordion-trigger" className="flex cursor-pointer items-center justify-between gap-4 px-4 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">{question}<ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-300" aria-hidden="true" /></summary><div data-slot="accordion-content" className="px-4 pb-4">{answer}</div></details>)}</div></section>
 				<section id="top-sites" className="top-sites-section" aria-labelledby="top-sites-title">
 					<div className="section-heading"><div><p className="eyebrow">INSPIRATIE VAN ANDERE SCOUTS</p><h2 id="top-sites-title">Tien beste Scoutingwebsites</h2></div><p>Heb jij een site die heel mooi is en goed scoort op de test? Als jij je score deelt dan komen de tien websites met de hoogste score in de ranglijst te staan.</p></div>
 					{page.topSites.length ? <ol className="top-sites-list">{page.topSites.map((site, index) => <li key={site.url}><a href={site.url} target="_blank" rel="noopener noreferrer"><span className="top-site-rank" aria-label={`Plaats ${index + 1}`}>{String(index + 1).padStart(2, '0')}</span><span className="top-site-name"><strong>{site.title}</strong><span>{new URL(site.url).hostname}</span></span><span className="top-site-score">{site.score}%</span><ArrowUpRight size={18} aria-hidden="true" /></a></li>)}</ol> : <p className="top-sites-empty">Er zijn nog geen scores gedeeld.</p>}
@@ -340,4 +340,4 @@ function App() {
 	</>;
 }
 
-createRoot(document.getElementById('app')!).render(page.report ? <ReportPage report={page.report} csrfToken={page.csrfToken} /> : <App />);
+createRoot(document.getElementById('app')!).render(page.report ? <Suspense fallback={<main className="container" aria-busy="true"><p role="status">Rapport laden...</p></main>}><ReportPage report={page.report} csrfToken={page.csrfToken} /></Suspense> : <App />);
