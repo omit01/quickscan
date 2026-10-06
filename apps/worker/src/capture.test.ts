@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateReport } from "./report.js";
-import { normalizeAiResult } from "./ai.js";
+import { AiEvaluationError, evaluateSite, normalizeAiResult } from "./ai.js";
 import { selectRelevantLinks } from "./capture.js";
 import { assessAccessibility, assessCls, assessMobile, assessSeo, assessSocialMetadata, isExposureContent } from "./technical.js";
 import { assertPublicWebUrl } from "@quickscan/site-policy";
@@ -56,6 +56,53 @@ test("normalizeAiResult repairs plain text and common criterion aliases", () => 
   const result = normalizeAiResult({ criteria: { call_to_action: "Een duidelijke aanmeldknop ontbreekt.", informationarchitectuur: { score: 2, toelichting: "Informatie staat verspreid.", verbeterpunt: "Groepeer praktische informatie.", insufficientEvidence: false } } });
   assert.equal(result.criteria.call_to_action?.score, 3);
   assert.equal(result.criteria.informatiearchitectuur?.score, 2);
+});
+
+test("evaluateSite requests structured JSON and diagnoses invalid Gemini responses", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "quickscan-ai-"));
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.GEMINI_API_KEY;
+  const criterion = { score: 3, toelichting: "Aanwezig.", verbeterpunt: "Verbeter dit.", insufficientEvidence: false };
+  const text = JSON.stringify({ criteria: { beeldgebruik: criterion } });
+  let reply: unknown = { candidates: [{ finishReason: "STOP", content: { parts: [{ text: "internal reasoning", thought: true }, { text: text.slice(0, 30) }, { text: text.slice(30) }] } }] };
+  try {
+    await mkdir(join(directory, "scan"));
+    await writeFile(join(directory, "scan", "homepage.json"), JSON.stringify({ text: "Scouting" }));
+    await writeFile(join(directory, "scan", "home-desktop.png"), "fixture");
+    await writeFile(join(directory, "scan", "home-mobile.png"), "fixture");
+    process.env.GEMINI_API_KEY = "test-key";
+    globalThis.fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body));
+      assert.equal(request.generationConfig.responseMimeType, "application/json");
+      const schema = request.generationConfig.responseSchema.properties.criteria;
+      assert.equal(schema.required.length, 9);
+      assert.equal(schema.properties.beeldgebruik.properties.score.maximum, 5);
+      return new Response(JSON.stringify(reply), { status: 200 });
+    };
+    assert.equal((await evaluateSite("scan", directory))?.criteria.beeldgebruik?.score, 3);
+
+    reply = { candidates: [{ finishReason: "STOP", content: { parts: [{ text: '{"criteria":{"beeldgebruik":{"score":3 "toelichting":"broken"}}}' }] } }] };
+    await assert.rejects(evaluateSite("scan", directory), (error: unknown) => {
+      assert.ok(error instanceof AiEvaluationError);
+      assert.match(error.message, /Gemini-analyse kon niet worden verwerkt/);
+      assert.equal(error.details.finishReason, "STOP");
+      assert.equal(error.details.responseArtifact, "ai-response.json");
+      assert.ok(Number(error.details.responseLength) > 0);
+      return true;
+    });
+    assert.deepEqual(JSON.parse(await readFile(join(directory, "scan", "ai-response.json"), "utf8")), reply);
+
+    reply = { candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text }] } }] };
+    await assert.rejects(evaluateSite("scan", directory), /Gemini brak de analyse af \(MAX_TOKENS\)/);
+    reply = { promptFeedback: { blockReason: "SAFETY" } };
+    await assert.rejects(evaluateSite("scan", directory), /geen analyse terug \(SAFETY\)/);
+    assert.equal((await readdir(join(directory, "scan"))).includes("report.json"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalKey;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("assessMobile flags overflow and small touch targets", () => {

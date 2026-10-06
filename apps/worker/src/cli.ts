@@ -1,7 +1,7 @@
 import { scanJobSchema, type TechnicalResults } from '@quickscan/contracts';
 import { captureHomepage } from './capture.js';
 import { runTechnicalChecks } from './technical.js';
-import { evaluateSite } from './ai.js';
+import { AiEvaluationError, evaluateSite } from './ai.js';
 import { generateReport } from './report.js';
 import { ScanLogger } from './logger.js';
 
@@ -98,7 +98,7 @@ try {
             'evaluating_ai',
             'AI_EVALUATION_FAILED',
             `AI evaluation failed: ${aiError}`,
-            undefined,
+            error instanceof AiEvaluationError ? error.details : undefined,
             error instanceof Error ? error : undefined
         );
         // AI failure doesn't stop the scan, continue with partial results
