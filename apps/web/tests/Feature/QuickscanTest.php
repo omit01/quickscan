@@ -130,6 +130,7 @@ class QuickscanTest extends TestCase
         $nonce = \Illuminate\Support\Facades\Vite::cspNonce();
         $this->assertNotEmpty($nonce);
         $this->assertStringContainsString("'nonce-{$nonce}'", $response->headers->get('Content-Security-Policy'));
+        $this->assertStringContainsString("worker-src 'self' blob:;", $response->headers->get('Content-Security-Policy'));
         $response->assertSee('nonce="'.$nonce.'"', false);
     }
 
