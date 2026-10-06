@@ -12,6 +12,8 @@ services:
       CACHE_STORE: database
     ports:
       - "8000:80"
+    networks:
+      - nginx-proxy-manager_default
     volumes:
       - quickscan-storage:/var/www/quickscan/apps/web/storage
       - ./apps/web/.env:/var/www/quickscan/apps/web/.env
@@ -29,3 +31,7 @@ services:
 
 volumes:
   quickscan-storage:
+
+networks:
+  nginx-proxy-manager_default:
+    external: true
