@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -20,6 +21,7 @@ class ScanController extends Controller
             'authorizedToScan' => ['required', 'accepted'],
             'activeSecurityChecksAuthorized' => ['required', 'boolean'],
             'formSubmissionTestingAuthorized' => ['sometimes', 'boolean'],
+            'duplicateScanConfirmed' => ['sometimes', 'boolean'],
         ]);
         $data['formSubmissionTestingAuthorized'] = $data['formSubmissionTestingAuthorized'] ?? false;
         $parts = parse_url($data['url']);
@@ -49,6 +51,13 @@ class ScanController extends Controller
             $totalScansToday = Scan::where('created_at', '>=', $todayStart)->count();
             if (! $user->is_admin && $totalScansToday >= 100) {
                 throw ValidationException::withMessages(['url' => 'Het totaal aantal scans vandaag is bereikt, kom morgen terug.']);
+            }
+            if (! ($data['duplicateScanConfirmed'] ?? false) && Scan::where('user_id', $user->id)
+                ->where('site_key', $siteKey)->whereIn('status', ['queued', 'running'])->exists()) {
+                abort(response()->json([
+                    'code' => 'scan_already_running',
+                    'message' => 'Er loopt nog een scan voor deze website. Wil je toch nog een scan starten?',
+                ], 409));
             }
             $scan = Scan::create([
                 'id' => (string) Str::uuid(),
@@ -118,6 +127,33 @@ class ScanController extends Controller
         ], ['site_key'], ['scan_id', 'title', 'url', 'score']);
 
         return response()->json(['shared' => true, 'score' => $score])->header('Cache-Control', 'no-store');
+    }
+
+    public function feedback(Request $request, Scan $scan)
+    {
+        abort_unless($scan->user_id === $request->user()->id && $scan->status === 'completed' && $scan->results !== null, 404);
+        $data = $request->validate([
+            'message' => ['required', 'string', 'max:5000'],
+        ], [
+            'message.required' => 'Vul je feedback in.',
+            'message.max' => 'Gebruik maximaal 5000 tekens.',
+        ]);
+        $body = "Feedback Website Quickscan\n\nVan: ".$request->user()->name
+            ."\nWebsite: ".$scan->url."\nScan: ".$scan->id."\n\n".$data['message'];
+
+        try {
+            Mail::raw($body, function ($message) {
+                $message->to(config('mail.feedback_to'))
+                    ->from(config('mail.from.address'), config('mail.from.name'))
+                    ->subject('Feedback Website Quickscan');
+            });
+        } catch (\Throwable $failure) {
+            report($failure);
+
+            return response()->json(['message' => 'Versturen is niet gelukt. Probeer het later opnieuw.'], 503);
+        }
+
+        return response()->json(['sent' => true])->header('Cache-Control', 'no-store');
     }
 
     public function report(Request $request, Scan $scan, string $format)

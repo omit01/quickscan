@@ -28,11 +28,15 @@ const impactWeights: Record<string, number> = {
 	structured_data: 20,
 };
 
-export function prioritizeActions(results: Pick<Report['results'], 'technical' | 'ai'>) {
+export function technicalScoreOnFive(score: number, maximum = 100) {
+	return Math.round(score / maximum * 50) / 10;
+}
+
+export function prioritizeActions(results: Pick<Report['results'], 'technical' | 'ai' | 'technicalScoreMax'>) {
 	const candidates = [
 		...Object.entries(results.technical)
 			.filter(([, result]) => result.status === 'fail' || result.status === 'warning')
-			.map(([key, result]) => ({ key, deficit: (100 - result.score) / 100, source: 'Techniek' })),
+			.map(([key, result]) => ({ key, deficit: (result.status === 'fail' ? 1 : Math.max(0.01, 1 - result.score / (results.technicalScoreMax ?? 100))), source: 'Techniek' })),
 		...Object.entries(results.ai?.criteria ?? {})
 			.filter(([, result]) => !result.insufficientEvidence && result.score < 4)
 			.map(([key, result]) => ({ key, deficit: (5 - result.score) / 4, source: 'AI-analyse' })),

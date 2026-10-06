@@ -7,6 +7,7 @@ export async function generateReport(scanId: string, artifactsPath: string, tech
   const home = JSON.parse(await readFile(join(directory, "homepage.json"), "utf8")) as { title: string; url: string };
   await writeFile(join(directory, "report.json"), JSON.stringify({
     home: { title: home.title, url: home.url },
+    technicalScoreMax: 5,
     technical: technicalResultsSchema.parse(technical),
     ai: ai ? aiResultsSchema.parse(ai) : undefined,
     aiError,

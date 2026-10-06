@@ -28,22 +28,26 @@ class Scan extends Model
             return null;
         }
 
-        return (int) round($technical->avg('score') * 0.5 + $criteria->avg('score') / 5 * 100 * 0.5);
+        $technicalScoreMax = $this->results['technicalScoreMax'] ?? 100;
+
+        return (int) round($technical->avg('score') / $technicalScoreMax * 100 * 0.5 + $criteria->avg('score') / 5 * 100 * 0.5);
     }
 
     public function saveResults(array $results): void
     {
-        $results = Arr::only($results, ['home', 'technical', 'ai', 'aiError', 'generatedAt']);
+        $results = Arr::only($results, ['home', 'technical', 'technicalScoreMax', 'ai', 'aiError', 'generatedAt']);
         $results['home'] = Arr::only($results['home'] ?? [], ['title', 'url']);
         
         $validator = Validator::make($results, [
             'home' => ['required', 'array:title,url'],
             'home.title' => ['present', 'nullable', 'string'],
             'home.url' => ['required', 'string', 'url:http,https'],
+            'technicalScoreMax' => ['sometimes', 'integer', 'in:5,100'],
             'technical' => ['required', 'array:https,mobile,pagespeed,cls,ssl_chain,dns_safety,form_submission,links_media,accessibility,seo_basics,indexability,structured_data,social_metadata,security_headers,cms_version,exposure'],
-            'technical.*' => ['required', 'array:status,score,detail'],
+            'technical.*' => ['required', 'array:status,score,detail,scoreType'],
             'technical.*.status' => ['required', 'in:pass,warning,fail,unavailable'],
-            'technical.*.score' => ['required', 'numeric', 'between:0,100'],
+            'technical.*.score' => ['required', 'numeric', 'min:0', 'max:'.($results['technicalScoreMax'] ?? 100)],
+            'technical.*.scoreType' => ['sometimes', 'in:binary'],
             'technical.*.detail' => ['required', 'string', 'max:1000'],
             'ai' => ['sometimes', 'nullable', 'array:criteria'],
             'ai.criteria' => ['required_with:ai', 'array:beeldgebruik,call_to_action,actualiteit,informatiearchitectuur,vrijwilligerswerving,taalgebruik,contact_avg,mobiele_ervaring,brand_consistency'],

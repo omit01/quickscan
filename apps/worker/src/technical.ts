@@ -34,8 +34,8 @@ export async function runTechnicalChecks(scanId: string, url: string, artifactsP
     // Browser checks failed - provide unavailable fallback metrics
     console.warn('Browser checks failed, using fallback unavailable results');
     browserChecks = {
-      mobile: { viewport: false, horizontalOverflow: false, smallTargets: 0, obscuredTargets: 0 },
-      accessibility: { language: false, missingAlt: 0, unlabeledFields: 0 },
+      mobile: { viewport: false, horizontalOverflow: false, smallTargets: 0, obscuredTargets: 0, totalTargets: 0 },
+      accessibility: { language: false, missingAlt: 0, unlabeledFields: 0, totalImages: 0, totalFields: 0 },
       seo: { titleLength: 0, descriptionLength: 0, h1: false, canonical: false, skippedHeadings: 0 },
       indexability: { noindex: false },
       structuredData: false,
@@ -43,6 +43,7 @@ export async function runTechnicalChecks(scanId: string, url: string, artifactsP
       checkedLinks: 0,
       brokenLinks: 0,
       brokenImages: 0,
+      checkedImages: 0,
     };
   }
   
@@ -56,34 +57,34 @@ export async function runTechnicalChecks(scanId: string, url: string, artifactsP
   const formSubmission = formSubmissionTesting ? await testFormSubmission(url, artifactsPath, scanId) : unavailable("Formuliertesten niet ingeschakeld.");
 
   return {
-    https: check(sslDays >= 14 && redirects, `Certificaat: ${sslDays} dagen; HTTP-redirect: ${redirects ? "actief" : "ontbreekt"}.`),
+    https: graded([sslDays >= 14 ? 1 : 0, redirects ? 1 : 0], sslDays >= 14 && redirects, `Certificaat: ${sslDays} dagen; HTTP-redirect: ${redirects ? "actief" : "ontbreekt"}.`, sslDays < 0 ? "fail" : "warning"),
     mobile: browserChecksAvailable ? assessMobile(browserChecks.mobile) : unavailable("Browsercontrole niet beschikbaar."),
     pagespeed: pageSpeedResult,
     cls: assessCls(clsScore),
     ssl_chain: sslChain,
     dns_safety: dnsSafety,
     form_submission: formSubmission,
-    links_media: browserChecksAvailable ? check(browserChecks.brokenLinks === 0 && browserChecks.brokenImages === 0, `${browserChecks.checkedLinks} interne links gecontroleerd; ${browserChecks.brokenLinks} kapot. ${browserChecks.brokenImages} kapotte afbeeldingen.`) : unavailable("Browsercontrole niet beschikbaar."),
+    links_media: browserChecksAvailable ? assessLinksMedia(browserChecks) : unavailable("Browsercontrole niet beschikbaar."),
     accessibility: browserChecksAvailable ? assessAccessibility(browserChecks.accessibility) : unavailable("Browsercontrole niet beschikbaar."),
     seo_basics: browserChecksAvailable ? assessSeo(browserChecks.seo) : unavailable("Browsercontrole niet beschikbaar."),
     indexability,
     structured_data: browserChecksAvailable ? check(browserChecks.structuredData, browserChecks.structuredData ? "Structured data is gevonden." : "Geen structured data gevonden.") : unavailable("Browsercontrole niet beschikbaar."),
     social_metadata: browserChecksAvailable ? assessSocialMetadata(browserChecks.socialMetadata) : unavailable("Browsercontrole niet beschikbaar."),
-    security_headers: check(missingHeaders.length === 0, missingHeaders.length ? `Ontbreekt: ${missingHeaders.join(", ")}.` : "Essentiele headers zijn aanwezig."),
+    security_headers: assessSecurityHeaders(missingHeaders.length, missingHeaders.length ? `Ontbreekt: ${missingHeaders.join(", ")}.` : "Essentiele headers zijn aanwezig."),
     cms_version: generator ? check(!/wordpress|joomla/i.test(generator), `Openbare generator: ${generator}.`) : unavailable("Geen openbare CMS-versie gevonden."),
     exposure,
   };
 }
 
-type MobileMetrics = { viewport: boolean; horizontalOverflow: boolean; smallTargets: number; obscuredTargets: number };
-type AccessibilityMetrics = { language: boolean; missingAlt: number; unlabeledFields: number };
+type MobileMetrics = { viewport: boolean; horizontalOverflow: boolean; smallTargets: number; obscuredTargets: number; totalTargets: number };
+type AccessibilityMetrics = { language: boolean; missingAlt: number; unlabeledFields: number; totalImages: number; totalFields: number };
 type SeoMetrics = { titleLength: number; descriptionLength: number; h1: boolean; canonical: boolean; skippedHeadings: number };
 type IndexabilityMetrics = { noindex: boolean };
 type SocialMetadataMetrics = { openGraph: boolean; xCard: boolean };
 
 export function assessCls(score: number | undefined) {
   return score !== undefined && Number.isFinite(score)
-    ? check(score <= 0.1, `CLS: ${score.toFixed(3)}; richtlijn: <= 0.1.`)
+    ? graded([score <= 0.1 ? 1 : score <= 0.25 ? 1 - (score - 0.1) / 0.15 * 0.5 : Math.max(0, 0.5 - (score - 0.25) / 0.25 * 0.5)], score <= 0.1, `CLS: ${score.toFixed(3)}; goed: <= 0.1; matig: <= 0.25; slecht: > 0.25.`, score > 0.25 ? "fail" : "warning")
     : unavailable("CLS niet beschikbaar via PageSpeed API.");
 }
 
@@ -95,7 +96,7 @@ export function assessMobile(metrics: MobileMetrics) {
     metrics.smallTargets > 0 && `${metrics.smallTargets} targets kleiner dan 48px`,
     metrics.obscuredTargets > 0 && `${metrics.obscuredTargets} bedekte targets`,
   ].filter(Boolean);
-  return check(passed, passed ? "Viewport en mobiele touch-targets zijn in orde." : `Aandacht: ${issues.join("; ")}.`);
+  return graded([Number(metrics.viewport), Number(!metrics.horizontalOverflow), healthyRatio(metrics.smallTargets, metrics.totalTargets), healthyRatio(metrics.obscuredTargets, metrics.totalTargets)], passed, `${passed ? "Viewport en mobiele touch-targets zijn in orde." : `Aandacht: ${issues.join("; ")}.`} ${metrics.totalTargets} touch-targets gecontroleerd.`);
 }
 
 export function assessAccessibility(metrics: AccessibilityMetrics) {
@@ -104,7 +105,8 @@ export function assessAccessibility(metrics: AccessibilityMetrics) {
     metrics.missingAlt > 0 && `${metrics.missingAlt} afbeeldingen zonder alt-tekst`,
     metrics.unlabeledFields > 0 && `${metrics.unlabeledFields} formuliervelden zonder label`,
   ].filter(Boolean);
-  return check(issues.length === 0, issues.length === 0 ? "Paginataal, alt-teksten en formulierlabels zijn aanwezig." : `Aandacht: ${issues.join("; ")}.`);
+  const labels = healthyRatio(metrics.unlabeledFields, metrics.totalFields);
+  return graded([Number(metrics.language), healthyRatio(metrics.missingAlt, metrics.totalImages), labels, labels], issues.length === 0, `${issues.length === 0 ? "Paginataal, alt-teksten en formulierlabels zijn aanwezig." : `Aandacht: ${issues.join("; ")}.`} ${metrics.totalImages} afbeeldingen en ${metrics.totalFields} velden gecontroleerd; formulierlabels wegen dubbel.`);
 }
 
 export function assessSeo(metrics: SeoMetrics) {
@@ -117,15 +119,23 @@ export function assessSeo(metrics: SeoMetrics) {
     !metrics.canonical && "canonical URL ontbreekt",
     metrics.skippedHeadings > 0 && `${metrics.skippedHeadings} overgeslagen kopniveau${metrics.skippedHeadings === 1 ? "" : "s"}`,
   ].filter(Boolean);
-  return check(issues.length === 0, issues.length === 0 ? "Titel, metabeschrijving, canonical URL en koppenstructuur zijn in orde." : `Aandacht: ${issues.join("; ")}.`);
+  return graded([metrics.titleLength === 0 ? 0 : metrics.titleLength >= 30 && metrics.titleLength <= 60 ? 1 : 0.6, metrics.descriptionLength === 0 ? 0 : metrics.descriptionLength >= 70 && metrics.descriptionLength <= 160 ? 1 : 0.6, Number(metrics.h1), Number(metrics.canonical), metrics.skippedHeadings === 0 ? 1 : 0], issues.length === 0, issues.length === 0 ? "Titel, metabeschrijving, canonical URL en koppenstructuur zijn in orde." : `Aandacht: ${issues.join("; ")}.`);
 }
 
 export function assessSocialMetadata(metrics: SocialMetadataMetrics) {
   const issues = [!metrics.openGraph && "Open Graph-tags ontbreken", !metrics.xCard && "X Card-tags ontbreken"].filter(Boolean);
-  return check(issues.length === 0, issues.length === 0 ? "Open Graph- en X Card-tags zijn aanwezig." : `Aandacht: ${issues.join("; ")}.`);
+  return graded([Number(metrics.openGraph), Number(metrics.xCard)], issues.length === 0, issues.length === 0 ? "Open Graph- en X Card-tags zijn aanwezig." : `Aandacht: ${issues.join("; ")}.`);
 }
 
-async function runBrowserChecks(scanId: string, url: string, artifactsPath: string): Promise<{ mobile: MobileMetrics; accessibility: AccessibilityMetrics; seo: SeoMetrics; indexability: IndexabilityMetrics; structuredData: boolean; socialMetadata: SocialMetadataMetrics; checkedLinks: number; brokenLinks: number; brokenImages: number }> {
+export function assessSecurityHeaders(missing: number, detail: string) {
+  return graded([(3 - missing) / 3], missing === 0, detail);
+}
+
+export function assessLinksMedia(metrics: { checkedLinks: number; brokenLinks: number; checkedImages: number; brokenImages: number }) {
+  return graded([healthyRatio(metrics.brokenLinks, metrics.checkedLinks), healthyRatio(metrics.brokenImages, metrics.checkedImages)], metrics.brokenLinks === 0 && metrics.brokenImages === 0, `${metrics.checkedLinks} interne links gecontroleerd; ${metrics.brokenLinks} kapot. ${metrics.checkedImages} afbeeldingen gecontroleerd; ${metrics.brokenImages} kapot.`);
+}
+
+async function runBrowserChecks(scanId: string, url: string, artifactsPath: string): Promise<{ mobile: MobileMetrics; accessibility: AccessibilityMetrics; seo: SeoMetrics; indexability: IndexabilityMetrics; structuredData: boolean; socialMetadata: SocialMetadataMetrics; checkedLinks: number; brokenLinks: number; brokenImages: number; checkedImages: number }> {
   const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: "block" });
   try {
@@ -138,6 +148,7 @@ async function runBrowserChecks(scanId: string, url: string, artifactsPath: stri
         .filter(({ rect }) => rect.width > 0 && rect.height > 0);
       return {
         mobile: {
+          totalTargets: targets.length,
           viewport: /(?:^|,)\s*width\s*=\s*device-width/i.test(document.querySelector('meta[name="viewport"]')?.getAttribute("content") ?? ""),
           horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
           smallTargets: targets.filter(({ rect }) => rect.width < 48 || rect.height < 48).length,
@@ -147,6 +158,8 @@ async function runBrowserChecks(scanId: string, url: string, artifactsPath: stri
           }).length,
         },
         accessibility: {
+          totalImages: document.images.length,
+          totalFields: document.querySelectorAll('input:not([type="hidden"]), select, textarea').length,
           language: Boolean(document.documentElement.lang),
           missingAlt: [...document.images].filter((image) => !image.hasAttribute("alt")).length,
           unlabeledFields: [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input:not([type="hidden"]), select, textarea')].filter((field) => !field.labels?.length && !field.getAttribute("aria-label") && !field.getAttribute("aria-labelledby")).length,
@@ -174,36 +187,38 @@ async function runBrowserChecks(scanId: string, url: string, artifactsPath: stri
     for (const link of scan.urls) {
       if (await isBrokenLink(link)) brokenLinks += 1;
     }
-    return { ...pageMetrics, checkedLinks: scan.urls.length, brokenLinks, brokenImages: scan.brokenImages };
+    return { ...pageMetrics, checkedLinks: scan.urls.length, brokenLinks, brokenImages: scan.brokenImages, checkedImages: scan.checkedImages };
   } finally {
     await browser.close();
   }
 }
 
-async function scanUrls(page: import("playwright").Page, homeUrl: string, scanId: string, artifactsPath: string): Promise<{ urls: string[]; brokenImages: number }> {
+async function scanUrls(page: import("playwright").Page, homeUrl: string, scanId: string, artifactsPath: string): Promise<{ urls: string[]; brokenImages: number; checkedImages: number }> {
   const selected = await readFile(join(artifactsPath, scanId, "selected-pages.json"), "utf8").catch(() => "[]");
   const knownPages = [homeUrl, ...((JSON.parse(selected) as Array<{ finalUrl?: string; url?: string }>).map((item) => item.finalUrl ?? item.url).filter(Boolean) as string[])];
   const host = new URL(homeUrl).hostname;
   const links = new Set<string>();
   let brokenImages = 0;
+  let checkedImages = 0;
   for (const pageUrl of knownPages) {
     if (page.url() !== pageUrl) {
       const loaded = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => undefined);
       if (!loaded) continue;
     }
-    brokenImages += await page.locator("img").evaluateAll((images) => images.filter((image) => {
+    const images = await page.locator("img").evaluateAll((images) => images.filter((image) => (image as HTMLImageElement).complete).map((image) => {
       const imageElement = image as HTMLImageElement;
-      return imageElement.complete && imageElement.naturalWidth === 0;
-    }).length);
+      return imageElement.naturalWidth === 0;
+    }));
+    checkedImages += images.length;
+    brokenImages += images.filter(Boolean).length;
     const hrefs = await page.locator("a[href]").evaluateAll((anchors) => anchors.map((anchor) => (anchor as HTMLAnchorElement).href));
     for (const href of hrefs) {
       const link = new URL(href);
       link.hash = "";
-      if (link.hostname === host && /^https?:$/.test(link.protocol)) links.add(link.toString());
-      if (links.size >= 20) return { urls: [...links], brokenImages };
+      if (links.size < 20 && link.hostname === host && /^https?:$/.test(link.protocol)) links.add(link.toString());
     }
   }
-  return { urls: [...links], brokenImages };
+  return { urls: [...links], brokenImages, checkedImages };
 }
 
 async function isBrokenLink(url: string): Promise<boolean> {
@@ -221,7 +236,10 @@ async function checkIndexability(url: string, headers: Headers, metrics: Indexab
     metrics.noindex && "noindex-meta gevonden",
     /noindex/i.test(headers.get("x-robots-tag") ?? "") && "X-Robots-Tag noindex gevonden",
   ].filter(Boolean);
-  return check(issues.length === 0, issues.length === 0 ? "robots.txt en sitemap.xml zijn bereikbaar; indexering is niet geblokkeerd." : `Aandacht: ${issues.join("; ")}.`);
+  const blocked = metrics.noindex || /noindex/i.test(headers.get("x-robots-tag") ?? "");
+  return blocked
+    ? { status: "fail" as const, score: 0, detail: `Indexering geblokkeerd: ${issues.join("; ")}.` }
+    : graded([1, 1, Number(Boolean(robots?.ok)), Number(Boolean(sitemap?.ok))], issues.length === 0, issues.length === 0 ? "robots.txt en sitemap.xml zijn bereikbaar; indexering is niet geblokkeerd." : `Aandacht: ${issues.join("; ")}.`);
 }
 
 type ExposureProbe = { path: string; label: string; matches: (body: string) => boolean };
@@ -242,7 +260,7 @@ async function checkExposure(url: string) {
   }
   return exposed.length === 0
     ? check(true, `${exposureProbes.length} gevoelige endpoints gecontroleerd; niets blootgesteld.`)
-    : { status: "fail" as const, detail: `Publiek toegankelijk: ${exposed.join(", ")}.`, score: 0 };
+    : { status: "fail" as const, detail: `Publiek toegankelijk: ${exposed.join(", ")}.`, score: 0, scoreType: "binary" as const };
 }
 
 export function isExposureContent(path: string, body: string): boolean {
@@ -250,7 +268,17 @@ export function isExposureContent(path: string, body: string): boolean {
 }
 
 function check(passed: boolean, detail: string) {
-  return { status: passed ? "pass" as const : "warning" as const, detail, score: passed ? 100 : 40 };
+  return { status: passed ? "pass" as const : "warning" as const, detail, score: passed ? 5 : 0, scoreType: "binary" as const };
+}
+
+function healthyRatio(errors: number, total: number): number | undefined {
+  return total > 0 ? Math.max(0, 1 - errors / total) : undefined;
+}
+
+function graded(parts: Array<number | undefined>, passed: boolean, detail: string, failureStatus: "warning" | "fail" = "warning") {
+  const available = parts.filter((part): part is number => part !== undefined);
+  if (!available.length) return unavailable("Geen toepasbare metingen. " + detail);
+  return { status: passed ? "pass" as const : failureStatus, detail, score: Math.round(available.reduce((sum, part) => sum + part, 0) / available.length * 50) / 10 };
 }
 
 function unavailable(detail: string) {
@@ -280,19 +308,21 @@ async function certificateDays(hostname: string): Promise<number> {
   });
 }
 
-async function pageSpeed(url: string): Promise<{ status: "pass" | "warning" | "fail" | "unavailable"; detail: string; score: number; clsScore?: number }> {
+export async function pageSpeed(url: string): Promise<{ status: "pass" | "warning" | "fail" | "unavailable"; detail: string; score: number; clsScore?: number }> {
   const key = process.env.GOOGLE_PAGESPEED_API_KEY;
   if (!key) return unavailable("Google PageSpeed API-sleutel ontbreekt.");
   try {
     const response = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?strategy=mobile&url=${encodeURIComponent(url)}&key=${key}`, { signal: AbortSignal.timeout(60_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const result = await response.json() as { lighthouseResult?: { categories?: { performance?: { score?: number } }; audits?: Record<string, { numericValue?: number }> } };
-    const score = Math.round((result.lighthouseResult?.categories?.performance?.score ?? 0) * 100);
+    const performance = result.lighthouseResult?.categories?.performance?.score;
+    if (performance === undefined || !Number.isFinite(performance) || performance < 0 || performance > 1) return unavailable("Lighthouse-prestatiescore ontbreekt of is ongeldig.");
+    const score = Math.round(performance * 100);
     const audits = result.lighthouseResult?.audits ?? {};
-    const fcp = Math.round((audits["first-contentful-paint"]?.numericValue ?? 0) / 100) / 10;
-    const lcp = Math.round((audits["largest-contentful-paint"]?.numericValue ?? 0) / 100) / 10;
+    const fcp = audits["first-contentful-paint"]?.numericValue;
+    const lcp = audits["largest-contentful-paint"]?.numericValue;
     const clsScore = audits["cumulative-layout-shift"]?.numericValue;
-    const result1 = check(score >= 50 && fcp < 2.5 && lcp < 3, `Mobiel: ${score}/100; FCP: ${fcp}s; LCP: ${lcp}s.`);
+    const result1 = graded([performance], performance >= 0.9, `Lighthouse mobiel: ${score}/100; FCP: ${fcp === undefined ? "niet beschikbaar" : `${Math.round(fcp / 100) / 10}s`}; LCP: ${lcp === undefined ? "niet beschikbaar" : `${Math.round(lcp / 100) / 10}s`}.`, performance < 0.5 ? "fail" : "warning");
     return { ...result1, clsScore };
   } catch (error) {
     return unavailable(`PageSpeed niet beschikbaar: ${error instanceof Error ? error.message : "onbekende fout"}`);
@@ -318,12 +348,6 @@ async function validateSslChain(hostname: string) {
           issues.push(`Certificaat verloopt in ${expiresIn} dagen`);
         }
         
-        // Check for wildcard
-        const hasWildcard = cert.subjectaltname?.includes("*.") ?? false;
-        if (hasWildcard) {
-          issues.push("Wildcard certificaat in gebruik");
-        }
-        
         socket.end();
         resolve();
       });
@@ -331,9 +355,7 @@ async function validateSslChain(hostname: string) {
       socket.on("error", reject);
     });
     
-    return issues.length === 0
-      ? check(true, "SSL-certificaatchain is geldig en correct geconfigureerd.")
-      : { status: "warning" as const, detail: `Certificaat: ${issues.join("; ")}.`, score: 60 };
+    return graded([1, issues.length === 0 ? 1 : 0], issues.length === 0, issues.length === 0 ? "SSL-certificaatchain is geldig en correct geconfigureerd." : `Certificaat: ${issues.join("; ")}.`);
   } catch (error) {
     return { status: "fail" as const, detail: `SSL-validatie mislukt: ${error instanceof Error ? error.message : "onbekende fout"}.`, score: 0 };
   }
@@ -353,9 +375,7 @@ async function checkDnsSafety(hostname: string) {
       issues.push("MX-record opzoeking mislukt");
     }
     
-    return issues.length === 0
-      ? check(true, "DNS en mail-routing zijn correct geconfigureerd.")
-      : { status: "warning" as const, detail: `DNS issues: ${issues.join("; ")}.`, score: 70 };
+    return check(issues.length === 0, issues.length === 0 ? "MX-records voor mail-routing zijn aanwezig." : `DNS issues: ${issues.join("; ")}.`);
   } catch (error) {
     return unavailable(`DNS-controle niet beschikbaar: ${error instanceof Error ? error.message : "onbekende fout"}`);
   }
@@ -453,11 +473,7 @@ async function testFormSubmission(url: string, artifactsPath: string, scanId: st
       const totalTested = submissionDetails.length;
       const passed = successCount === totalTested;
       
-      return {
-        status: passed ? ("pass" as const) : ("warning" as const),
-        detail: `${successCount}/${totalTested} formulieren succesvol getest. Opmerking: dit is geautomatiseerde testing; controleer handmatig of berichten werkelijk zijn binnengekomen.`,
-        score: passed ? 100 : 50,
-      };
+      return graded([successCount / totalTested], passed, `${successCount}/${totalTested} formulieren succesvol getest. Opmerking: dit is geautomatiseerde testing; controleer handmatig of berichten werkelijk zijn binnengekomen.`);
     } catch (error) {
       await browser.close();
       return unavailable(`Formulier-test mislukt: ${error instanceof Error ? error.message : "onbekende fout"}`);

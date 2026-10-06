@@ -33,6 +33,7 @@ Route::middleware(RequireSolMember::class)->group(function () {
     Route::post('/api/scans', [ScanController::class, 'store'])->middleware('throttle:scan-submissions');
     Route::get('/api/scans/{scan}', [ScanController::class, 'show'])->whereUuid('scan');
     Route::post('/api/scans/{scan}/share', [ScanController::class, 'share'])->whereUuid('scan')->middleware('throttle:20,1');
+    Route::post('/api/scans/{scan}/feedback', [ScanController::class, 'feedback'])->whereUuid('scan')->middleware('throttle:5,10');
     Route::post('/api/scans/{scan}/retry', [ScanController::class, 'retry'])->whereUuid('scan')->middleware('throttle:scan-submissions');
     Route::get('/api/scans/{scan}/report.{format}', [ScanController::class, 'report'])->whereUuid('scan')->whereIn('format', ['html', 'json']);
 });

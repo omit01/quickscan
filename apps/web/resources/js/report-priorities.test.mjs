@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { prioritizeActions } from './report-priorities.ts';
+import { prioritizeActions, technicalScoreOnFive } from './report-priorities.ts';
 
 const check = (score, status = 'warning') => ({ status, score, detail: 'Testresultaat.' });
 const criterion = (score, insufficientEvidence = false) => ({ score, insufficientEvidence, toelichting: 'Beoordeling.', verbeterpunt: 'Verbeteradvies.' });
@@ -37,4 +37,21 @@ test('overlapping mobile advice is represented by its highest-priority result on
 		ai: { criteria: { mobiele_ervaring: criterion(1), actualiteit: criterion(2) } },
 	});
 	assert.deepEqual(actions.map(action => action.key), ['mobiele_ervaring', 'actualiteit', 'pagespeed']);
+});
+
+test('new and legacy technical scales produce equivalent priorities and display scores', () => {
+	const legacy = { technical: { mobile: check(40), pagespeed: check(76), exposure: check(0, 'fail') }, ai: { criteria: { call_to_action: criterion(3) } } };
+	const current = { ...legacy, technicalScoreMax: 5, technical: { mobile: check(2), pagespeed: check(3.8), exposure: { ...check(0, 'fail'), scoreType: 'binary' } } };
+	assert.deepEqual(prioritizeActions(current), prioritizeActions(legacy));
+	assert.equal(technicalScoreOnFive(76), 3.8);
+	assert.equal(technicalScoreOnFive(3.8, 5), 3.8);
+	assert.equal(technicalScoreOnFive(0, 5), 0);
+	assert.equal(technicalScoreOnFive(5, 5), 5);
+});
+
+test('critical failures cannot be diluted and rounded warnings remain actionable', () => {
+	const actions = prioritizeActions({ technicalScoreMax: 5, technical: { https: check(2.5, 'fail'), mobile: check(5) } });
+	assert.equal(actions[0].key, 'https');
+	assert.equal(actions[0].deficit, 1);
+	assert.ok(actions.some(action => action.key === 'mobile'));
 });

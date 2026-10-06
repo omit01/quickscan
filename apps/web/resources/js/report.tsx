@@ -1,19 +1,21 @@
 import { useState } from 'react';
-import { ArrowLeft, ArrowUpRight, Check, CircleAlert, CircleHelp, ShieldCheck, Sparkles, Printer, Share2, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Check, CircleAlert, CircleHelp, ShieldCheck, Sparkles, Printer, Share2, LoaderCircle, MessageSquare, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { prioritizeActions } from './report-priorities';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { prioritizeActions, technicalScoreOnFive } from './report-priorities';
 
-type CheckResult = { status: 'pass' | 'warning' | 'fail' | 'unavailable'; score: number; detail: string };
+type CheckResult = { status: 'pass' | 'warning' | 'fail' | 'unavailable'; score: number; detail: string; scoreType?: 'binary' };
 type Criterion = { score: number; toelichting: string; verbeterpunt: string; insufficientEvidence?: boolean };
 export type Report = {
 	id: string; url: string;
 	score: number | null; shared: boolean;
-	results: { home: { title: string | null; url: string }; technical: Record<string, CheckResult>; ai?: { criteria: Record<string, Criterion> } | null; aiError?: string | null; generatedAt: string };
+	results: { home: { title: string | null; url: string }; technicalScoreMax?: 5 | 100; technical: Record<string, CheckResult>; ai?: { criteria: Record<string, Criterion> } | null; aiError?: string | null; generatedAt: string };
 };
 
 const guides: Record<string, { label: string; meaning: string; action: string; url: string }> = {
@@ -44,6 +46,12 @@ const statuses = {
 	fail: { label: 'Aanpakken', icon: CircleAlert }, unavailable: { label: 'Niet beoordeeld', icon: CircleHelp },
 };
 const severity = { fail: 0, warning: 1, unavailable: 2, pass: 3 };
+const binaryChecks = new Set(['structured_data', 'cms_version', 'dns_safety', 'exposure']);
+
+function TechnicalScore({ checkKey, result, maximum }: { checkKey: string; result: CheckResult; maximum?: number }) {
+	if (result.status === 'unavailable' || result.scoreType === 'binary' || binaryChecks.has(checkKey)) return null;
+	return <p className="result-score">Testscore: {technicalScoreOnFive(result.score, maximum).toLocaleString('nl-NL', { maximumFractionDigits: 1 })} / 5</p>;
+}
 
 function Status({ result }: { result: CheckResult }) {
 	const state = statuses[result.status];
@@ -54,6 +62,10 @@ export function ReportPage({ report, csrfToken }: { report: Report; csrfToken: s
 	const [shared, setShared] = useState(report.shared);
 	const [sharing, setSharing] = useState(false);
 	const [shareError, setShareError] = useState('');
+	const [feedback, setFeedback] = useState('');
+	const [feedbackSending, setFeedbackSending] = useState(false);
+	const [feedbackSent, setFeedbackSent] = useState(false);
+	const [feedbackError, setFeedbackError] = useState('');
 	const { results } = report;
 	const technical = Object.entries(results.technical).sort(([, first], [, second]) => severity[first.status] - severity[second.status] || first.score - second.score);
 	const criteria = Object.entries(results.ai?.criteria ?? {});
@@ -68,7 +80,6 @@ export function ReportPage({ report, csrfToken }: { report: Report; csrfToken: s
 	}));
 
 	async function shareScore() {
-		if (!window.confirm('Wil je de sitenaam, websitelink en score openbaar delen voor de top 10? Je rapport en accountgegevens worden niet openbaar. Een eerder gedeelde score van deze website wordt vervangen.')) return;
 		setSharing(true);
 		setShareError('');
 		try {
@@ -82,6 +93,29 @@ export function ReportPage({ report, csrfToken }: { report: Report; csrfToken: s
 		} catch (failure) {
 			setShareError(failure instanceof Error ? failure.message : 'Geen verbinding. Probeer opnieuw.');
 		} finally { setSharing(false); }
+	}
+
+	async function sendFeedback(event: React.FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		setFeedbackSending(true);
+		setFeedbackSent(false);
+		setFeedbackError('');
+		try {
+			const response = await fetch(`/api/scans/${report.id}/feedback`, {
+				method: 'POST',
+				headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+				body: JSON.stringify({ message: feedback }),
+			});
+			if (response.status === 401 || response.status === 419) throw new Error('Je sessie is verlopen. Log opnieuw in via de homepage.');
+			if (response.status === 429) throw new Error('Je hebt al meerdere berichten verstuurd. Probeer het over tien minuten opnieuw.');
+			if (response.status >= 500) throw new Error('Versturen is niet gelukt. Probeer het later opnieuw.');
+			const result = await response.json();
+			if (!response.ok) throw new Error(result.errors ? String(Object.values(result.errors).flat()[0]) : 'Versturen is niet gelukt. Probeer opnieuw.');
+			setFeedback('');
+			setFeedbackSent(true);
+		} catch (failure) {
+			setFeedbackError(failure instanceof Error ? failure.message : 'Geen verbinding. Probeer opnieuw.');
+		} finally { setFeedbackSending(false); }
 	}
 
 	return <>
@@ -98,7 +132,21 @@ export function ReportPage({ report, csrfToken }: { report: Report; csrfToken: s
 				<div className="report-overall">
 					<div><h2>Gewogen score</h2><strong>{report.score === null ? '-' : `${report.score}%`}</strong><p>{report.score === null ? 'Nog geen totaalscore: techniek en bezoekerservaring moeten allebei beoordeeld zijn.' : '50% techniek en 50% bezoekerservaring. Niet-beoordeelde onderdelen tellen niet mee.'}</p></div>
 					{report.score !== null && <div className="report-share">
-						<Button onClick={() => void shareScore()} disabled={sharing || shared}>{sharing ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : shared ? <Check aria-hidden="true" /> : <Share2 aria-hidden="true" />}{sharing ? 'Score delen...' : shared ? 'Score gedeeld' : 'Deel deze score'}</Button>
+						<AlertDialog>
+							<AlertDialogTrigger asChild><Button disabled={sharing || shared}>{sharing ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : shared ? <Check aria-hidden="true" /> : <Share2 aria-hidden="true" />}{sharing ? 'Score delen...' : shared ? 'Score gedeeld' : 'Deel deze score'}</Button></AlertDialogTrigger>
+							<AlertDialogContent className="max-w-[calc(100%-2rem)] border-black shadow-lg sm:max-w-md">
+								<AlertDialogHeader className="place-items-start gap-3 text-left">
+									<Share2 className="size-10 border-2 border-black bg-primary p-2 shadow-sm" aria-hidden="true" />
+									<AlertDialogTitle className="text-xl">Score openbaar delen?</AlertDialogTitle>
+									<AlertDialogDescription className="text-left text-foreground">Je sitenaam, websitelink en score worden openbaar gedeeld voor de top 10. Je rapport en accountgegevens worden niet openbaar.</AlertDialogDescription>
+								</AlertDialogHeader>
+								<p className="text-sm text-muted-foreground">Een eerder gedeelde score van deze website wordt vervangen.</p>
+								<AlertDialogFooter className="rounded-b border-black">
+									<AlertDialogCancel>Annuleren</AlertDialogCancel>
+									<AlertDialogAction onClick={() => void shareScore()}><Share2 aria-hidden="true" />Publiceer score</AlertDialogAction>
+								</AlertDialogFooter>
+							</AlertDialogContent>
+							</AlertDialog>
 						{shared ? <p role="status">Je score is gedeeld. <a href="/#top-sites">Bekijk de top 10<ArrowUpRight size={14} aria-hidden="true" /></a></p> : <p>Alleen je sitenaam, link en score worden openbaar.</p>}
 						{shareError && <p role="alert">{shareError}</p>}
 					</div>}
@@ -117,7 +165,7 @@ export function ReportPage({ report, csrfToken }: { report: Report; csrfToken: s
 					<TabsContent value="technical" data-print-section="TECHNIEK"><p className="report-section-note">Automatische controles op de bezochte pagina's. Niet-beoordeelde checks tellen niet als geslaagd.</p>
 						{technical.length ? <Accordion type="multiple" className="report-checks">{technical.map(([key, result]) => <AccordionItem key={key} value={key}>
 							<AccordionTrigger><span className="result-name">{guides[key]?.label ?? key}</span><Status result={result} /></AccordionTrigger>
-							<AccordionContent><div className="result-detail"><p className="result-observation">{result.detail}</p>{result.status !== 'unavailable' && <p className="result-score">Testscore: {result.score}/100</p>}
+							<AccordionContent><div className="result-detail"><p className="result-observation">{result.detail}</p><TechnicalScore checkKey={key} result={result} maximum={results.technicalScoreMax} />
 								{guides[key] && <><h3>Wat betekent dit?</h3><p>{guides[key].meaning}</p>{(result.status === 'warning' || result.status === 'fail') && <><h3>Volgende stap</h3><p>{guides[key].action}</p></>}
 								<a href={guides[key].url} target="_blank" rel="noopener noreferrer">Meer informatie<ArrowUpRight size={14} aria-hidden="true" /></a></>}
 							</div></AccordionContent>
@@ -137,7 +185,7 @@ export function ReportPage({ report, csrfToken }: { report: Report; csrfToken: s
 						<p className="report-section-note">Automatische controles op de bezochte pagina's. Niet-beoordeelde checks tellen niet als geslaagd.</p>
 						{technical.length ? <div className="report-checks">{technical.map(([key, result]) => <div key={key} className="print-check-item">
 							<div className="print-check-header"><span className="result-name">{guides[key]?.label ?? key}</span><Status result={result} /></div>
-							<div className="result-detail"><p className="result-observation">{result.detail}</p>{result.status !== 'unavailable' && <p className="result-score">Testscore: {result.score}/100</p>}
+							<div className="result-detail"><p className="result-observation">{result.detail}</p><TechnicalScore checkKey={key} result={result} maximum={results.technicalScoreMax} />
 								{guides[key] && <><h3>Wat betekent dit?</h3><p>{guides[key].meaning}</p>{(result.status === 'warning' || result.status === 'fail') && <><h3>Volgende stap</h3><p>{guides[key].action}</p></>}
 								<a href={guides[key].url} target="_blank" rel="noopener noreferrer">Meer informatie<ArrowUpRight size={14} aria-hidden="true" /></a></>}
 							</div>
@@ -155,6 +203,19 @@ export function ReportPage({ report, csrfToken }: { report: Report; csrfToken: s
 			</section>
 			<section className="report-footnote"><div className="container"><ShieldCheck aria-hidden="true" /><p>Dit is een quickscan, geen volledige veiligheids- of toegankelijkheidsaudit. Het rapport is alleen toegankelijk vanuit jouw account.</p></div></section>
 		</main>
+		<footer className="site-footer report-feedback"><div className="container">
+			<h2>Help deze tool beter te maken.</h2>
+			<details>
+				<summary><MessageSquare size={18} aria-hidden="true" />Geef feedback</summary>
+				<form onSubmit={sendFeedback} aria-busy={feedbackSending}>
+					<label htmlFor="report-feedback">Jouw feedback</label>
+					<Textarea id="report-feedback" value={feedback} onChange={event => { setFeedback(event.target.value); setFeedbackSent(false); setFeedbackError(''); }} required maxLength={5000} rows={5} disabled={feedbackSending} />
+					<Button type="submit" disabled={feedbackSending || !feedback.trim()}>{feedbackSending ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}{feedbackSending ? 'Versturen...' : 'Verstuur feedback'}</Button>
+					{feedbackSent && <p role="status">Bedankt! Je feedback is verstuurd.</p>}
+					{feedbackError && <p role="alert">{feedbackError}</p>}
+				</form>
+			</details>
+		</div></footer>
 		<Button onClick={() => window.print()} className="print-button"><Printer size={18} aria-hidden="true" />Afdrukken</Button>
 	</>;
 }

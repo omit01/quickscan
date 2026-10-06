@@ -25,6 +25,10 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       GOOGLE_PAGESPEED_API_KEY: ${GOOGLE_PAGESPEED_API_KEY:-}
+      MAIL_MAILER: ${MAIL_MAILER:-resend}
+      RESEND_KEY: ${RESEND_KEY:-}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-no-reply@timoklabbers.nl}
+      MAIL_TO_ADDRESS: ${MAIL_TO_ADDRESS:-timo.klabbers@scouting.nl}
       LOG_CHANNEL: stderr
       LOG_LEVEL: info
       DB_CONNECTION: sqlite

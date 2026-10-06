@@ -57,7 +57,8 @@ export const checkStatusSchema = z.enum(["pass", "warning", "fail", "unavailable
 export const technicalCheckSchema = z.object({
   status: checkStatusSchema,
   detail: z.string().min(1).max(1_000),
-  score: z.number().min(0).max(100),
+  score: z.number().min(0).max(5),
+  scoreType: z.literal("binary").optional(),
 });
 
 export const technicalCheckKeySchema = z.enum([

@@ -10,6 +10,7 @@ use App\Services\SolClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -17,6 +18,110 @@ use Tests\TestCase;
 class QuickscanTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_report_feedback_is_mailed_with_configured_addresses_and_scan_context(): void
+    {
+        config(['mail.from.address' => 'sender@example.com', 'mail.feedback_to' => 'feedback@example.com']);
+        $this->member();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+            'url' => 'https://example.com', 'site_key' => 'example.com',
+            'status' => 'completed', 'results' => ['technical' => []],
+        ]);
+        Mail::shouldReceive('raw')->once()->withArgs(function ($body, $configure) use ($scan) {
+            $this->assertStringContainsString('Duidelijk rapport!', $body);
+            $this->assertStringContainsString($scan->url, $body);
+            $this->assertStringContainsString($scan->id, $body);
+            $message = new \Illuminate\Mail\Message(new \Symfony\Component\Mime\Email);
+            $configure($message);
+            $this->assertSame('feedback@example.com', $message->getSymfonyMessage()->getTo()[0]->getAddress());
+            $this->assertSame('sender@example.com', $message->getSymfonyMessage()->getFrom()[0]->getAddress());
+
+            return true;
+        });
+        $this->postJson('/api/scans/'.$scan->id.'/feedback', ['message' => 'Duidelijk rapport!'])
+            ->assertOk()->assertExactJson(['sent' => true]);
+    }
+
+    public function test_report_feedback_uses_the_resend_api_transport(): void
+    {
+        config([
+            'mail.default' => 'resend', 'services.resend.key' => 're_test',
+            'mail.from.address' => 'sender@example.com', 'mail.feedback_to' => 'feedback@example.com',
+        ]);
+        $this->member();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+            'url' => 'https://example.com', 'site_key' => 'example.com',
+            'status' => 'completed', 'results' => ['technical' => []],
+        ]);
+        $history = [];
+        $handler = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/json'], '{"id":"test-email-id"}'),
+            new \GuzzleHttp\Psr7\Response(403, ['Content-Type' => 'application/json'], '{"name":"validation_error","message":"Sender not verified"}'),
+        ]));
+        $handler->push(\GuzzleHttp\Middleware::history($history));
+        $client = new \Resend\Client(new \Resend\Transporters\HttpTransporter(
+            new \GuzzleHttp\Client(['handler' => $handler]),
+            \Resend\ValueObjects\Transporter\BaseUri::from('api.resend.com'),
+            \Resend\ValueObjects\Transporter\Headers::withAuthorization(\Resend\ValueObjects\ApiKey::from('re_test')),
+        ));
+        $mailer = Mail::mailer();
+        $this->assertInstanceOf(\Illuminate\Mail\Transport\ResendTransport::class, $mailer->getSymfonyTransport());
+        $mailer->setSymfonyTransport(new \Illuminate\Mail\Transport\ResendTransport($client));
+
+        $endpoint = '/api/scans/'.$scan->id.'/feedback';
+        $this->postJson($endpoint, ['message' => 'Feedback via Resend'])
+            ->assertOk()->assertExactJson(['sent' => true]);
+        $request = $history[0]['request'];
+        $this->assertSame('POST', $request->getMethod());
+        $this->assertSame('https://api.resend.com/emails', (string) $request->getUri());
+        $this->assertSame('Bearer re_test', $request->getHeaderLine('Authorization'));
+        $payload = json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('sender@example.com', $payload['from']);
+        $this->assertSame(['feedback@example.com'], $payload['to']);
+        $this->assertSame('Feedback Website Quickscan', $payload['subject']);
+        $this->assertStringContainsString('Feedback via Resend', $payload['text']);
+        $this->assertStringContainsString($scan->id, $payload['text']);
+
+        $this->postJson($endpoint, ['message' => 'Feedback via Resend'])
+            ->assertStatus(503)->assertJson(['message' => 'Versturen is niet gelukt. Probeer het later opnieuw.']);
+    }
+
+    public function test_report_feedback_rejects_invalid_input_and_unauthorized_access(): void
+    {
+        $this->member();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+            'url' => 'https://example.com', 'site_key' => 'example.com',
+            'status' => 'completed', 'results' => ['technical' => []],
+        ]);
+        Mail::shouldReceive('raw')->never();
+        $endpoint = '/api/scans/'.$scan->id.'/feedback';
+        foreach (['', '   ', str_repeat('a', 5001), ['invalid']] as $message) {
+            $this->postJson($endpoint, ['message' => $message])->assertUnprocessable()->assertJsonValidationErrors('message');
+        }
+        $scan->update(['status' => 'running']);
+        $this->postJson($endpoint, ['message' => 'Feedback'])->assertNotFound();
+        $scan->update(['status' => 'completed']);
+        auth()->logout();
+        $this->postJson($endpoint, ['message' => 'Feedback'])->assertUnauthorized();
+        $this->member();
+        $this->postJson($endpoint, ['message' => 'Feedback'])->assertNotFound();
+    }
+
+    public function test_report_feedback_returns_an_error_when_mail_delivery_fails(): void
+    {
+        $this->member();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+            'url' => 'https://example.com', 'site_key' => 'example.com',
+            'status' => 'completed', 'results' => ['technical' => []],
+        ]);
+        Mail::shouldReceive('raw')->once()->andThrow(new \RuntimeException('Mail unavailable'));
+        $this->postJson('/api/scans/'.$scan->id.'/feedback', ['message' => 'Feedback'])
+            ->assertStatus(503)->assertJson(['message' => 'Versturen is niet gelukt. Probeer het later opnieuw.']);
+    }
 
     public function test_weighted_score_excludes_unassessed_results_and_requires_both_categories(): void
     {
@@ -39,6 +144,35 @@ class QuickscanTest extends TestCase
         $this->assertNull($scan->weightedScore());
         $scan->results = null;
         $this->assertNull($scan->weightedScore());
+    }
+
+    public function test_new_technical_scale_preserves_weighting_and_is_validated_on_storage(): void
+    {
+        $this->member();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(), 'url' => 'https://example.com', 'site_key' => 'example.com',
+        ]);
+        $results = [
+            'home' => ['title' => 'Voorbeeld', 'url' => 'https://example.com'],
+            'technicalScoreMax' => 5,
+            'technical' => [
+                'https' => ['status' => 'pass', 'score' => 5, 'scoreType' => 'binary', 'detail' => 'HTTPS actief.'],
+                'mobile' => ['status' => 'warning', 'score' => 3.5, 'detail' => 'Kleine knoppen.'],
+                'pagespeed' => ['status' => 'unavailable', 'score' => 0, 'detail' => 'Niet gemeten.'],
+            ],
+            'ai' => ['criteria' => [
+                'beeldgebruik' => ['score' => 4, 'toelichting' => 'Goed.', 'verbeterpunt' => 'Actuele beelden.'],
+                'actualiteit' => ['score' => 1, 'toelichting' => 'Onbekend.', 'verbeterpunt' => 'Nieuws.', 'insufficientEvidence' => true],
+            ]],
+            'generatedAt' => now()->toISOString(),
+        ];
+        $scan->saveResults($results);
+        $this->assertSame($results, $scan->fresh()->results);
+        $this->assertSame(83, $scan->weightedScore());
+
+        $results['technical']['mobile']['score'] = 40;
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $scan->saveResults($results);
     }
 
     public function test_sharing_publishes_only_server_score_and_one_entry_per_website(): void
@@ -203,7 +337,7 @@ class QuickscanTest extends TestCase
             'status' => 'failed', 'can_retry' => true,
         ]);
         for ($index = 0; $index < 3; $index++) {
-            $this->postJson('/api/scans', $this->submission())->assertAccepted();
+            $this->postJson('/api/scans', [...$this->submission(), 'duplicateScanConfirmed' => true])->assertAccepted();
         }
         $this->postJson('/api/scans/'.$scan->id.'/retry')->assertUnprocessable();
         $this->assertSame('failed', $scan->fresh()->status);
@@ -343,13 +477,51 @@ class QuickscanTest extends TestCase
         Queue::fake();
         $this->member();
         $first = $this->postJson('/api/scans', $this->submission())->assertAccepted()->assertJsonPath('status', 'queued')->assertJsonPath('phase', 'queued')->json('id');
-        $second = $this->postJson('/api/scans', $this->submission())->assertAccepted()->json('id');
+        $second = $this->postJson('/api/scans', [...$this->submission(), 'duplicateScanConfirmed' => true])->assertAccepted()->json('id');
         $this->assertNotSame($first, $second);
         $this->assertDatabaseHas('scans', ['id' => $first, 'site_key' => 'example.com', 'active_security_checks' => false]);
         Queue::assertPushed(RunScan::class, 2);
         $this->postJson('/api/scans', [...$this->submission(), 'authorizedToScan' => false])->assertUnprocessable();
         $this->postJson('/api/scans', [...$this->submission(), 'url' => 'http://127.0.0.1'])->assertUnprocessable();
         $this->postJson('/api/scans', [...$this->submission(), 'url' => 'https://user:pass@example.com'])->assertUnprocessable();
+    }
+
+    public function test_duplicate_pending_scan_requires_confirmation_for_the_same_website(): void
+    {
+        Queue::fake();
+        $this->member();
+        $scan = Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+            'url' => 'https://www.example.com/', 'site_key' => 'example.com',
+        ]);
+        foreach (['queued', 'running'] as $status) {
+            $scan->update(['status' => $status]);
+            $this->postJson('/api/scans', [...$this->submission(), 'url' => 'http://EXAMPLE.com./contact', 'duplicateScanConfirmed' => false])
+                ->assertStatus(409)->assertJsonPath('code', 'scan_already_running');
+        }
+        $this->assertDatabaseCount('scans', 1);
+        Queue::assertNothingPushed();
+        $this->postJson('/api/scans', [...$this->submission(), 'duplicateScanConfirmed' => true])->assertAccepted();
+        $this->assertDatabaseCount('scans', 2);
+        Queue::assertPushed(RunScan::class, 1);
+    }
+
+    public function test_finished_and_other_users_scans_do_not_require_confirmation(): void
+    {
+        Queue::fake();
+        $this->member();
+        foreach (['completed', 'failed'] as $status) {
+            Scan::create([
+                'id' => (string) Str::uuid(), 'user_id' => auth()->id(),
+                'url' => 'https://example.com', 'site_key' => 'example.com', 'status' => $status,
+            ]);
+        }
+        Scan::create([
+            'id' => (string) Str::uuid(), 'user_id' => User::factory()->create()->id,
+            'url' => 'https://example.com', 'site_key' => 'example.com', 'status' => 'running',
+        ]);
+        $this->postJson('/api/scans', $this->submission())->assertAccepted();
+        Queue::assertPushed(RunScan::class, 1);
     }
 
     public function test_failed_sol_callback_logs_safe_diagnostics_and_clears_oidc_session(): void
@@ -441,9 +613,9 @@ class QuickscanTest extends TestCase
         Queue::fake();
         $this->member();
         for ($index = 0; $index < 3; $index++) {
-            $this->postJson('/api/scans', $this->submission())->assertAccepted();
+            $this->postJson('/api/scans', [...$this->submission(), 'duplicateScanConfirmed' => true])->assertAccepted();
         }
-        $this->postJson('/api/scans', $this->submission())->assertUnprocessable();
+        $this->postJson('/api/scans', [...$this->submission(), 'duplicateScanConfirmed' => true])->assertUnprocessable();
         $this->member();
         $this->postJson('/api/scans', $this->submission())->assertAccepted();
     }
@@ -464,7 +636,7 @@ class QuickscanTest extends TestCase
             Scan::create(['id' => (string) Str::uuid(), 'user_id' => $user->id, 'url' => 'https://example.com', 'site_key' => 'example.com']);
         }
         for ($index = 0; $index < 12; $index++) {
-            $this->postJson('/api/scans', $this->submission())->assertAccepted();
+            $this->postJson('/api/scans', [...$this->submission(), 'duplicateScanConfirmed' => true])->assertAccepted();
         }
         $this->postJson('/api/scans', [...$this->submission(), 'authorizedToScan' => false])->assertUnprocessable();
         $this->postJson('/api/scans', [...$this->submission(), 'url' => 'http://127.0.0.1'])->assertUnprocessable();

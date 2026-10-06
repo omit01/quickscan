@@ -182,6 +182,28 @@ Reports are owner-protected and rendered from structured results in the database
 container defaults to SQLite and a single queue worker; use a managed MySQL or
 PostgreSQL database if you later need more write concurrency.
 
+## Report Feedback Email
+
+The report footer lets the scan owner send feedback to `MAIL_TO_ADDRESS`
+(default `timo.klabbers@scouting.nl`) from `MAIL_FROM_ADDRESS`
+(default `no-reply@timoklabbers.nl`). Messages include the account name, website URL
+and scan ID, not the full report. Feedback requires a valid session and CSRF
+token, accepts up to 5000 characters and allows five submissions per ten minutes.
+
+Configure `MAIL_MAILER=resend` and `RESEND_KEY` (your real Resend API key) in
+the Laravel environment or Portainer stack environment. Production Compose
+defaults to Resend, using Laravel's built-in driver and the official Resend PHP
+SDK to send via HTTPS; no SMTP settings are needed.
+Set `MAIL_FROM_ADDRESS` and `MAIL_TO_ADDRESS` there to override the email addresses.
+Verify the sender domain in Resend and publish the DNS records it provides.
+For initial testing, `MAIL_FROM_ADDRESS=onboarding@resend.dev` can send only to
+your Resend account email; set `MAIL_TO_ADDRESS` accordingly. Use a verified
+domain to send feedback to the intended recipient in production.
+Enter the API key directly in the deployment environment, never in Git or chat.
+Recreate the container after changing settings and verify delivery to the inbox.
+Local development defaults to `MAIL_MAILER=log`: submissions are logged instead
+of delivered. A successful local submission does not verify real email delivery.
+
 ## Report Storage
 
 Each scan stores one JSON `results` column: page title/URL, technical statuses,
@@ -210,9 +232,38 @@ retention policy to those files.
 ### Shared Scores And Top Ten
 
 Reports show a server-calculated score: 50% average assessed technical score
-and 50% average AI criterion score converted from 1-5 to a percentage. Unavailable
+converted from 0-5 to a percentage and 50% average AI criterion score converted
+from 1-5 to a percentage. Unavailable
 technical checks and AI criteria with insufficient evidence are excluded. Both
 categories must contain an assessed result; otherwise no total score can be shared.
+
+New reports declare `technicalScoreMax: 5`. Legacy reports without this field
+retain their stored 0-100 scale for totals and priorities; their displayed test
+scores are converted to 0-5. Old observations are not retrospectively rescored.
+AI scoring is unchanged.
+
+Technical scores are rounded to one decimal and calculated from measured parts:
+
+| Check | Scoring |
+| --- | --- |
+| HTTPS | Equal parts: certificate valid for at least 14 days and HTTP redirect |
+| Mobile | Equal parts: viewport, no overflow, share of large targets, share of unobscured targets |
+| Accessibility | Language, share of images with alt attributes, share of labeled fields (double weight) |
+| SEO | Title, description, H1, canonical, heading order; present but out-of-range title/description earn 60% of that part |
+| Links/media | Equal average of working-link and loaded-image proportions |
+| Security headers | Proportion of the three checked protections present |
+| Social metadata | Open Graph and X Card presence, equal weight |
+| PageSpeed | Native Lighthouse performance score multiplied by five; FCP/LCP shown as evidence |
+| CLS | 5 through 0.1, linear to 2.5 at 0.25, linear to 0 at 0.5; above 0.25 is a failure |
+| SSL chain | Valid chain and no certificate warnings, equal weight; invalid chain scores 0 |
+| Indexability | No blocking meta/header directives, robots.txt and sitemap presence; any noindex scores 0 and fails |
+| Forms | Proportion of tested submissions with a detected success signal; delivery still requires manual confirmation |
+
+Empty populations (no images, fields, targets or links) do not earn free points;
+their parts are excluded. If no applicable measurements remain, the check is
+unavailable. Binary checks (structured data, MX records, CMS disclosure and exposed
+configuration files) show only a status, use `scoreType: "binary"`, and contribute
+0 or 5 internally. One exposed file fails the entire exposure check.
 
 Sharing is opt-in through the owner's report, with confirmation before publication.
 Only the site title, URL and score appear publicly next to the FAQ. Reports and
@@ -225,8 +276,11 @@ from `apps/web`.
 ### Action Priorities
 
 "Begin hiermee" ranks technical and AI findings together, without another AI
-request. Priority is impact weight times score deficit: `(100 - score) / 100`
-for technical checks and `(5 - score) / 4` for AI criteria. These are explicit
+request. Priority is impact weight times score deficit: `(5 - score) / 5`
+for new technical checks (legacy: `(100 - score) / 100`) and `(5 - score) / 4`
+for AI criteria. Technical failures use the full deficit regardless of partial
+points; warnings have a minimum deficit of 0.01 to remain actionable after rounding.
+These are explicit
 editorial weights for Scouting websites, not a universal quality standard:
 
 | Weight | Topics |

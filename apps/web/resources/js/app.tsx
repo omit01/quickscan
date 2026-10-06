@@ -9,6 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import '@fontsource/archivo-black/latin-400.css';
@@ -73,6 +75,10 @@ function App() {
 	const [scans, setScans] = useState(page.scans);
 	const [uniqueSites, setUniqueSites] = useState(page.uniqueSites);
 	const [busy, setBusy] = useState(false);
+	const [scanSetupOpen, setScanSetupOpen] = useState(false);
+	const [duplicateDraft, setDuplicateDraft] = useState<Draft | null>(null);
+	const [scanToReveal, setScanToReveal] = useState<string | null>(null);
+	const historyTitle = useRef<HTMLHeadingElement>(null);
 	const [error, setError] = useState(page.authError ?? '');
 	const [expired, setExpired] = useState(false);
 	const [pollingError, setPollingError] = useState(false);
@@ -116,21 +122,40 @@ function App() {
 		try { sessionStorage.setItem(draftKey, JSON.stringify({ url, authorized, active, formSubmissionTesting, pending })); } catch {}
 	}
 
-	async function startScan(draft: Draft) {
+	async function startScan(draft: Draft, confirmed = false) {
+		if (busy) return;
+		if (!confirmed) {
+			try {
+				const siteKey = (value: string) => new URL(value).hostname.toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
+				if (scans.some(scan => ['queued', 'running'].includes(scan.status) && siteKey(scan.url) === siteKey(draft.url))) {
+					setScanSetupOpen(false);
+					setDuplicateDraft(draft);
+					return;
+				}
+			} catch {}
+		}
 		setBusy(true);
 		setError('');
 		try {
 			const response = await fetch('/api/scans', {
 				method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-TOKEN': page.csrfToken },
-				body: JSON.stringify({ url: draft.url, authorizedToScan: draft.authorized, activeSecurityChecksAuthorized: draft.active, formSubmissionTestingAuthorized: draft.formSubmissionTesting }),
+				body: JSON.stringify({ url: draft.url, authorizedToScan: draft.authorized, activeSecurityChecksAuthorized: draft.active, formSubmissionTestingAuthorized: draft.formSubmissionTesting, duplicateScanConfirmed: confirmed }),
 			});
 			const result = await response.json();
+			if (response.status === 409 && result.code === 'scan_already_running') {
+				setScanSetupOpen(false);
+				setDuplicateDraft(draft);
+				return;
+			}
 			if (response.status === 401 || response.status === 419) {
 				setExpired(true);
 				throw new Error('Je sessie is verlopen. Log opnieuw in met SOL 3.0.');
 			}
 			if (!response.ok) throw new Error(result.errors ? String(Object.values(result.errors).flat()[0]) : result.message ?? 'De scan kon niet worden gestart.');
 			setScans(current => [result as Scan, ...current].slice(0, 10));
+			setScanSetupOpen(false);
+			setUrl('');
+			setScanToReveal(result.id);
 			try { sessionStorage.removeItem(draftKey); } catch {}
 		} catch (failure) {
 			setError(failure instanceof Error ? failure.message : 'Geen verbinding. Probeer opnieuw.');
@@ -138,9 +163,15 @@ function App() {
 	}
 
 	useEffect(() => {
+		if (!scanToReveal) return;
+		historyTitle.current?.focus({ preventScroll: true });
+		historyTitle.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+	}, [scanToReveal]);
+
+	useEffect(() => {
 		if (page.user && initialDraft.pending && !page.authError) {
 			try { sessionStorage.setItem(draftKey, JSON.stringify({ ...initialDraft, pending: false })); } catch {}
-			void startScan(initialDraft);
+			setScanSetupOpen(true);
 		}
 	}, []);
 
@@ -174,8 +205,27 @@ function App() {
 
 	function submit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
+		const input = event.currentTarget.elements.namedItem('url') as HTMLInputElement;
+		const trimmedUrl = url.trim();
+		const normalizedUrl = /^[a-z][a-z\d+.-]*:/i.test(trimmedUrl) ? trimmedUrl : `https://${trimmedUrl}`;
+		try {
+			const parsedUrl = new URL(normalizedUrl);
+			if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Unsupported protocol');
+		} catch {
+			input.setCustomValidity('Vul een geldig websiteadres in, zoals scouting.nl of https://scouting.nl.');
+			input.reportValidity();
+			return;
+		}
+		setUrl(normalizedUrl);
+		setError('');
+		setScanToReveal(null);
+		setScanSetupOpen(true);
+	}
+
+	function confirmScan(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		if (!signedIn) return;
 		if (!authorized) { setError('Bevestig dat je deze website mag scannen.'); return; }
-		if (!signedIn) { saveDraft(true); window.location.assign('/auth/sol'); return; }
 		void startScan({ url, authorized, active, formSubmissionTesting, pending: false });
 	}
 
@@ -204,13 +254,10 @@ function App() {
 					<form className="scan-form" onSubmit={submit}>
 						<Label htmlFor="website" className="url-label">Welke website wil je checken?</Label>
 						<div className="url-row">
-							<div className="url-input"><Globe2 aria-hidden="true" {...hoverHint('Een hele wereld aan websites. We beginnen met die van jou.')} /><Input id="website" name="url" type="url" placeholder="https://jouwscoutinggroep.nl" maxLength={2048} required value={url} onChange={event => setUrl(event.target.value)} aria-describedby={error ? 'scan-error' : undefined} autoComplete="url" /></div>
-							<Button type="submit" size="lg" disabled={busy} {...hoverHint('Een APK voor je website, daar kennen we een mannetje voor.')}>{busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : signedIn ? <ArrowRight aria-hidden="true" /> : <LockKeyhole aria-hidden="true" />}{busy ? 'Scan starten...' : signedIn ? 'Start mijn quickscan' : 'Log in met SOL 3.0'}</Button>
+							<div className="url-input"><Globe2 aria-hidden="true" {...hoverHint('Een hele wereld aan websites. We beginnen met die van jou.')} /><Input id="website" name="url" type="text" inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="https://jouwscoutinggroep.nl" maxLength={2048} required value={url} onChange={event => { event.target.setCustomValidity(''); setUrl(event.target.value); setAuthorized(false); setActive(false); setFormSubmissionTesting(false); }} aria-describedby={error ? 'scan-error' : undefined} autoComplete="url" /></div>
+							<Button id="scan-start" className="scan-action" type="submit" size="lg" disabled={busy}>Scannen<ArrowRight aria-hidden="true" /></Button>
 						</div>
-						<div className="consent-row"><Checkbox id="authorized" checked={authorized} onCheckedChange={value => setAuthorized(value === true)} required /><Label htmlFor="authorized">Ik heb toestemming om deze website te scannen.</Label></div>
-						<div className="consent-row"><Checkbox id="active" checked={active} onCheckedChange={value => setActive(value === true)} /><Label htmlFor="active">Controleer ook bekende locaties op blootgestelde configuratiebestanden.</Label></div>
-						<div className="consent-row"><Checkbox id="formSubmissionTesting" checked={formSubmissionTesting} onCheckedChange={value => setFormSubmissionTesting(value === true)} /><Label htmlFor="formSubmissionTesting">Test contactformulieren op de website (standaard: geen verzending; AI vult testdata in).</Label></div>
-						<div className="form-meta"><span><Check aria-hidden="true" />Concreet verbeteradvies</span><span><FileText aria-hidden="true" />Rapport opgeslagen</span><span><LockKeyhole aria-hidden="true" />Alleen voor jouw account</span></div>
+						<div className="form-meta"><span><Check aria-hidden="true" />Binnen enkele minuten inzicht</span><span><Check aria-hidden="true" />Geen technische kennis nodig</span><span><Check aria-hidden="true" />Alleen met jouw toestemming</span></div>
 					</form>
 					{signedIn && <>
 						<p className="welcome">Aangemeld als {page.user?.name}.</p>
@@ -226,7 +273,7 @@ function App() {
 				<div className="container counter-inner"><div className="counter-number" aria-live="polite" {...hoverHint('Al deze websites gingen je voor. Groepsdruk, maar dan nuttig.')}>{new Intl.NumberFormat('nl-NL').format(uniqueSites)}<ArrowUpRight aria-hidden="true" /></div><div><h2>Scoutingwebsites gecheckt.</h2><p>Samen maken we Scouting online sterker.</p></div><Globe2 className="counter-globe" aria-hidden="true" {...hoverHint('De wereld draait door. Je website hopelijk ook.')} /></div>
 			</section>
 			{signedIn && scans.length > 0 && <section className="scan-history container" aria-labelledby="history-title">
-				<div className="section-top"><h2 id="history-title">Jouw scans</h2><Badge variant="outline">Alleen zichtbaar voor jou</Badge></div>
+				<div className="section-top"><h2 id="history-title" ref={historyTitle} tabIndex={-1}>Jouw scans</h2><Badge variant="outline">Alleen zichtbaar voor jou</Badge></div>
 				{pollingError && <p role="status">Status ophalen lukt even niet. We proberen het opnieuw; je scan gaat op de achtergrond verder.</p>}
 				<div aria-live="polite" className="scan-list">{scans.map(scan => <div key={scan.id} className="scan-item">
 					<div className="scan-details"><span className="scan-url">{scan.url}</span><span className="scan-phase">{['queued', 'running'].includes(scan.status) && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}{phaseNames[scan.phase] ?? 'Scan bezig'}{scan.error ? `: ${scan.error}` : ''}</span></div>
@@ -255,6 +302,43 @@ function App() {
 			</div>
 			<section className="closing-band"><div className="container"><h2>Klaar voor een frisse blik?</h2><Button variant="secondary" size="lg" asChild><a href="#scan" {...hoverHint('Kom! Streep dat puntje van je actielijst!')}>Check je website<ArrowRight aria-hidden="true" /></a></Button></div></section>
 		</main>
+		<Dialog open={scanSetupOpen} onOpenChange={open => { if (!busy) setScanSetupOpen(open); }}>
+			<DialogContent className="scan-dialog" showCloseButton={false} onCloseAutoFocus={event => { event.preventDefault(); if (scanToReveal) historyTitle.current?.focus({ preventScroll: true }); else document.getElementById('scan-start')?.focus({ preventScroll: true }); }}>
+				<DialogHeader>
+					<DialogTitle>{signedIn ? 'Quickscan starten' : 'Bijna klaar om te scannen'}</DialogTitle>
+					<DialogDescription>{signedIn ? 'Bevestig je toestemming en kies eventuele extra controles.' : 'Om het rapport veilig op te slaan voor jouw groep, log je in met je Scouting-account.'}</DialogDescription>
+				</DialogHeader>
+				<p className="scan-target"><Globe2 size={18} aria-hidden="true" /><span>{url}</span></p>
+				{error && <Alert role="alert"><AlertTitle>Even opletten</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+				{signedIn ? <form onSubmit={confirmScan}>
+					<fieldset className="scan-consents" disabled={busy}>
+						<legend className="sr-only">Toestemming en extra controles</legend>
+						<div className="consent-row"><Checkbox id="authorized" checked={authorized} onCheckedChange={value => setAuthorized(value === true)} required disabled={busy} /><Label htmlFor="authorized">Ik bevestig dat ik betrokken ben bij deze Scoutinggroep en toestemming heb om deze scan uit te voeren.</Label></div>
+						<details className="scan-advanced">
+							<summary>Geavanceerde controles <span>(optioneel)</span></summary>
+							<div className="consent-row"><Checkbox id="active" checked={active} onCheckedChange={value => setActive(value === true)} disabled={busy} /><Label htmlFor="active">Controleer openbare configuratie- en back-upbestanden</Label></div>
+							<div className="consent-row"><Checkbox id="formSubmissionTesting" checked={formSubmissionTesting} onCheckedChange={value => setFormSubmissionTesting(value === true)} disabled={busy} /><Label htmlFor="formSubmissionTesting">Test contactformulieren met AI-testdata (zonder verzending)</Label></div>
+						</details>
+					</fieldset>
+					<div className="scan-dialog-actions"><Button type="button" variant="outline" disabled={busy} onClick={() => setScanSetupOpen(false)}>Annuleren</Button><Button className="scan-action" type="submit" disabled={busy || !authorized}>{busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <ArrowRight aria-hidden="true" />}{busy ? 'Scan starten...' : 'Start volledige scan'}</Button></div>
+				</form> : <div className="scan-login-actions">
+					<Button className="scan-action" asChild><a href="/auth/sol" onClick={() => saveDraft(true)}><LockKeyhole aria-hidden="true" />Inloggen met Scouting Online (SOL)</a></Button>
+					<Button type="button" variant="ghost" onClick={() => setScanSetupOpen(false)}>Annuleren</Button>
+				</div>}
+			</DialogContent>
+		</Dialog>
+		<AlertDialog open={duplicateDraft !== null} onOpenChange={open => { if (!open) setDuplicateDraft(null); }}>
+			<AlertDialogContent className="max-w-[calc(100%-2rem)] sm:max-w-md" onCloseAutoFocus={event => { event.preventDefault(); document.getElementById('website')?.focus({ preventScroll: true }); }}>
+				<AlertDialogHeader>
+					<AlertDialogTitle>Er loopt al een scan</AlertDialogTitle>
+					<AlertDialogDescription>Er loopt nog een scan voor deze website. Wil je toch nog een scan starten?</AlertDialogDescription>
+				</AlertDialogHeader>
+				<AlertDialogFooter>
+					<AlertDialogCancel>Annuleren</AlertDialogCancel>
+					<AlertDialogAction onClick={() => { if (duplicateDraft) void startScan(duplicateDraft, true); }}>Toch een scan starten</AlertDialogAction>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
 		<footer className="site-footer"><div className="container footer-inner"><div className="footer-brand"><img src="/scouting-logo.png" width="64" height="58" alt="Scouting" /><div><strong>Website Quickscan</strong><p>Tips voor een betere website. Voor en door scouts.</p></div></div><div className="footer-links"><a href="https://www.scouting.nl/privacy" target="_blank" rel="noopener noreferrer">Privacy<ArrowUpRight size={14} aria-hidden="true" /></a><a href="#faq">Veelgestelde vragen</a><span>{new Date().getFullYear()} · Timo Klabbers</span></div></div></footer>
 		{tooltipPos.visible && <div className="tooltip" aria-hidden="true" style={{left: `${tooltipPos.x}px`, top: `${tooltipPos.y}px`}}>{tooltipPos.text ?? makerHint}</div>}
 		{discoveredHints.size > 0 && <aside className="hint-progress" aria-label="Ontdekte hoverhints"><span role="status">{discoveredHints.size} / {tooltipTotal}</span><div className="hint-progress-track" role="progressbar" aria-label="Ontdekte hoverhints" aria-valuemin={0} aria-valuemax={tooltipTotal} aria-valuenow={discoveredHints.size}><span style={{ width: `${discoveredHints.size / tooltipTotal * 100}%` }} /></div></aside>}
