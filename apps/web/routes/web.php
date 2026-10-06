@@ -23,7 +23,9 @@ Route::get('/', function (Request $request, SolIdentity $identity) {
         'oidcConfigured' => $identity->configured(),
         'csrfToken' => csrf_token(),
         'scanLimits' => $scanLimits,
-    ]])->header('Cache-Control', 'private, no-store');
+    ]])->header('Cache-Control', $request->user() || $request->session()->has('auth_error')
+        ? 'private, no-store'
+        : 'private, no-cache, max-age=0, must-revalidate');
 });
 Route::get('/api/stats', fn () => ['uniqueSites' => DB::table('checked_sites')->count()])->middleware('throttle:60,1');
 Route::get('/auth/sol', [SolController::class, 'login'])->name('login')->middleware('throttle:10,1');

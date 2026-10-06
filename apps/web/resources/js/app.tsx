@@ -13,11 +13,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import '@fontsource/archivo-black/latin-400.css';
-import '@fontsource/space-grotesk/latin-400.css';
-import '@fontsource/space-grotesk/latin-500.css';
-import '@fontsource/space-grotesk/latin-700.css';
-import '../css/app.css';
 
 type Scan = { id: string; url: string; status: string; phase: string; error?: string | null; created_at: string };
 type Draft = { url: string; authorized: boolean; active: boolean; formSubmissionTesting: boolean; pending: boolean };
@@ -234,7 +229,7 @@ function App() {
 		<header className="site-header">
 			<div className="container header-inner">
 				<a href="#" className="brand" aria-label="Scouting Website Quickscan, bovenaan">
-					<img src="/scouting-logo.png" alt="Scouting" width="54" height="48" />
+					<img src="/scouting-logo.webp" alt="Scouting" width="54" height="48" />
 					<span>WEBSITE<span className="brand-sub">QUICKSCAN</span></span>
 				</a>
 				<nav aria-label="Hoofdnavigatie"><a href="#checks">De checks</a><a href="#faq">Veelgestelde vragen</a></nav>
@@ -339,7 +334,7 @@ function App() {
 				</AlertDialogFooter>
 			</AlertDialogContent>
 		</AlertDialog>
-		<footer className="site-footer"><div className="container footer-inner"><div className="footer-brand"><img src="/scouting-logo.png" width="64" height="58" alt="Scouting" /><div><strong>Website Quickscan</strong><p>Tips voor een betere website. Voor en door scouts.</p></div></div><div className="footer-links"><a href="https://www.scouting.nl/privacy" target="_blank" rel="noopener noreferrer">Privacy<ArrowUpRight size={14} aria-hidden="true" /></a><a href="#faq">Veelgestelde vragen</a><span>{new Date().getFullYear()} · Timo Klabbers</span></div></div></footer>
+		<footer className="site-footer"><div className="container footer-inner"><div className="footer-brand"><img src="/scouting-logo.webp" width="64" height="58" alt="Scouting" /><div><strong>Website Quickscan</strong><p>Tips voor een betere website. Voor en door scouts.</p></div></div><div className="footer-links"><a href="https://www.scouting.nl/privacy" target="_blank" rel="noopener noreferrer">Privacy<ArrowUpRight size={14} aria-hidden="true" /></a><a href="#faq">Veelgestelde vragen</a><span>{new Date().getFullYear()} · Timo Klabbers</span></div></div></footer>
 		{tooltipPos.visible && <div className="tooltip" aria-hidden="true" style={{left: `${tooltipPos.x}px`, top: `${tooltipPos.y}px`}}>{tooltipPos.text ?? makerHint}</div>}
 		{discoveredHints.size > 0 && <aside className="hint-progress" aria-label="Ontdekte hoverhints"><span role="status">{discoveredHints.size} / {tooltipTotal}</span><div className="hint-progress-track" role="progressbar" aria-label="Ontdekte hoverhints" aria-valuemin={0} aria-valuemax={tooltipTotal} aria-valuenow={discoveredHints.size}><span style={{ width: `${discoveredHints.size / tooltipTotal * 100}%` }} /></div></aside>}
 	</>;

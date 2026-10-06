@@ -8,7 +8,12 @@
     <title>Website Quickscan | Scouting</title>
     <link rel="icon" href="/favicon.ico" sizes="any">
     @viteReactRefresh
-    @vite(['resources/css/app.css', 'resources/js/app.tsx'])
+    @if(Illuminate\Support\Facades\Vite::isRunningHot())
+        @vite(['resources/css/app.css', 'resources/js/app.tsx'])
+    @else
+        <style @if(Illuminate\Support\Facades\Vite::cspNonce()) nonce="{{ Illuminate\Support\Facades\Vite::cspNonce() }}" @endif>{!! Illuminate\Support\Facades\Vite::content('resources/css/app.css') !!}</style>
+        @vite('resources/js/app.tsx')
+    @endif
 </head>
 <body>
     <div id="app"></div>

@@ -19,6 +19,46 @@ class QuickscanTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_built_styles_are_inlined_with_a_nonce_without_stylesheet_requests(): void
+    {
+        $buildDirectory = 'build-test-'.Str::uuid();
+        $directory = public_path($buildDirectory);
+        File::makeDirectory($directory);
+        File::put($directory.'/app.css', 'body{color:rgb(26,24,21)}');
+        File::put($directory.'/manifest.json', json_encode([
+            'resources/css/app.css' => ['file' => 'app.css', 'src' => 'resources/css/app.css', 'isEntry' => true],
+            'resources/js/app.tsx' => ['file' => 'app.js', 'src' => 'resources/js/app.tsx', 'isEntry' => true],
+        ]));
+        \Illuminate\Support\Facades\Vite::useBuildDirectory($buildDirectory)->useHotFile($directory.'/hot');
+        $this->app->detectEnvironment(fn () => 'production');
+
+        try {
+            $response = $this->get('https://localhost/')->assertOk();
+            $nonce = \Illuminate\Support\Facades\Vite::cspNonce();
+            $this->assertNotEmpty($nonce);
+            $this->assertMatchesRegularExpression('/<style\s+nonce="'.preg_quote($nonce, '/').'"\s*>body\{color:rgb\(26,24,21\)\}<\/style>/', $response->getContent());
+            $response->assertSee('/'.$buildDirectory.'/app.js', false)
+                ->assertDontSee('rel="stylesheet"', false)
+                ->assertDontSee('/'.$buildDirectory.'/app.css', false);
+        } finally {
+            File::deleteDirectory($directory);
+        }
+    }
+
+    public function test_homepage_cache_policy_allows_guest_history_without_caching_private_pages(): void
+    {
+        $this->withoutVite();
+        $this->get('/')->assertOk()
+            ->assertHeader('Cache-Control', 'max-age=0, must-revalidate, no-cache, private');
+
+        $this->withSession(['auth_error' => 'Login failed'])->get('/')->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private');
+
+        session()->forget('auth_error');
+        $this->actingAs(User::factory()->create())->get('/')->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private');
+    }
+
     public function test_report_feedback_is_mailed_with_configured_addresses_and_scan_context(): void
     {
         config(['mail.from.address' => 'sender@example.com', 'mail.feedback_to' => 'feedback@example.com']);
