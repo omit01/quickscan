@@ -31,6 +31,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 WORKDIR /var/www/quickscan/apps/web
 COPY --from=build /var/www/quickscan /var/www/quickscan
 COPY docker/apache-site.conf /etc/apache2/sites-available/000-default.conf
+COPY docker/php.ini /usr/local/etc/php/conf.d/zz-quickscan.ini
 COPY docker/supervisord.conf /etc/supervisor/conf.d/quickscan.conf
 COPY docker/entrypoint.sh /usr/local/bin/quickscan-entrypoint
 RUN chmod +x /usr/local/bin/quickscan-entrypoint \
